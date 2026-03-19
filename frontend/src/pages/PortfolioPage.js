@@ -29,13 +29,11 @@ export default function PortfolioPage() {
   return (
     <div className="page" style={{ paddingTop: 32, paddingBottom: 48 }}>
       <h1 style={{ fontSize: '1.75rem', fontWeight: 800, marginBottom: 24 }}>Portfolio</h1>
-
-      {/* Summary cards */}
       <div className="grid-3" style={{ marginBottom: 32 }}>
         {[
-          { label: 'Cash Balance', value: `$${summary.balance?.toFixed(2) || '0.00'}`, color: 'var(--green)' },
-          { label: 'Positions Value', value: `$${summary.totalValue?.toFixed(2) || '0.00'}`, color: 'var(--blue2)' },
-          { label: 'Total P&L', value: `${summary.totalPnl >= 0 ? '+' : ''}$${summary.totalPnl?.toFixed(2) || '0.00'}`, color: summary.totalPnl >= 0 ? 'var(--green)' : 'var(--red)' },
+          { label: 'Cash Balance', value: `ZAR ${summary.balance?.toFixed(2) || '0.00'}`, color: 'var(--green)' },
+          { label: 'Positions Value', value: `ZAR ${summary.totalValue?.toFixed(2) || '0.00'}`, color: 'var(--blue2)' },
+          { label: 'Total P&L', value: `${summary.totalPnl >= 0 ? '+' : ''}ZAR ${summary.totalPnl?.toFixed(2) || '0.00'}`, color: summary.totalPnl >= 0 ? 'var(--green)' : 'var(--red)' },
         ].map((s, i) => (
           <div key={i} className="card" style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '0.75rem', color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-mono)', marginBottom: 8 }}>{s.label}</div>
@@ -43,12 +41,10 @@ export default function PortfolioPage() {
           </div>
         ))}
       </div>
-
       <div className="tabs">
         <button className={`tab ${tab === 'positions' ? 'active' : ''}`} onClick={() => setTab('positions')}>Positions ({positions.length})</button>
         <button className={`tab ${tab === 'trades' ? 'active' : ''}`} onClick={() => setTab('trades')}>Trade History ({trades.length})</button>
       </div>
-
       {tab === 'positions' && (
         positions.length === 0 ? (
           <div className="empty-state">
@@ -60,8 +56,7 @@ export default function PortfolioPage() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {positions.map(p => (
-              <div key={p.id} className="card" style={{ cursor: 'pointer', borderColor: p.outcome === 'YES' ? 'rgba(0,211,149,0.15)' : 'rgba(255,73,118,0.15)' }}
-                onClick={() => navigate('market', p.marketId)}>
+              <div key={p.id} className="card" style={{ cursor: 'pointer', borderColor: p.outcome === 'YES' ? 'rgba(0,211,149,0.15)' : 'rgba(255,73,118,0.15)' }} onClick={() => navigate('market', p.marketId)}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
@@ -72,7 +67,7 @@ export default function PortfolioPage() {
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <div className={p.pnl >= 0 ? 'pnl-pos' : 'pnl-neg'} style={{ fontSize: '1.1rem', fontWeight: 800 }}>
-                      {p.pnl >= 0 ? '+' : ''}{p.pnl?.toFixed(2)}
+                      {p.pnl >= 0 ? '+' : ''}ZAR {p.pnl?.toFixed(2)}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text3)' }}>{p.pnlPct >= 0 ? '+' : ''}{p.pnlPct?.toFixed(1)}%</div>
                   </div>
@@ -81,23 +76,20 @@ export default function PortfolioPage() {
                   <div className="stat-item"><span className="stat-label">Shares</span><span className="stat-value">{p.shares}</span></div>
                   <div className="stat-item"><span className="stat-label">Avg Price</span><span className="stat-value">{(p.avgPrice * 100).toFixed(1)}¢</span></div>
                   <div className="stat-item"><span className="stat-label">Current</span><span className="stat-value">{(p.currentPrice * 100).toFixed(1)}¢</span></div>
-                  <div className="stat-item"><span className="stat-label">Value</span><span className="stat-value">${p.currentValue?.toFixed(2)}</span></div>
+                  <div className="stat-item"><span className="stat-label">Value</span><span className="stat-value">ZAR {p.currentValue?.toFixed(2)}</span></div>
                 </div>
               </div>
             ))}
           </div>
         )
       )}
-
       {tab === 'trades' && (
         trades.length === 0 ? (
           <div className="empty-state"><div className="empty-state-icon">📋</div><div>No trades yet</div></div>
         ) : (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <table className="table">
-              <thead>
-                <tr><th>Market</th><th>Outcome</th><th>Type</th><th>Shares</th><th>Price</th><th>Amount</th><th>Date</th></tr>
-              </thead>
+              <thead><tr><th>Market</th><th>Outcome</th><th>Type</th><th>Shares</th><th>Price</th><th>Amount</th><th>Date</th></tr></thead>
               <tbody>
                 {trades.map(t => (
                   <tr key={t.id}>
@@ -106,7 +98,7 @@ export default function PortfolioPage() {
                     <td><span style={{ color: t.type === 'buy' ? 'var(--green)' : 'var(--red)', fontSize: '0.8rem' }}>{t.type}</span></td>
                     <td className="text-mono">{t.shares}</td>
                     <td className="text-mono">{(t.price * 100).toFixed(1)}¢</td>
-                    <td className="text-mono">${t.amount?.toFixed(2)}</td>
+                    <td className="text-mono">ZAR {t.amount?.toFixed(2)}</td>
                     <td style={{ fontSize: '0.75rem', color: 'var(--text3)' }}>{new Date(t.createdAt).toLocaleDateString()}</td>
                   </tr>
                 ))}
