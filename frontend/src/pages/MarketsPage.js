@@ -20,60 +20,43 @@ export default function MarketsPage() {
   const categories = ['All', 'Crypto', 'Finance'];
 
   function fmtBig(n) {
-    if (!n) return '$0';
+    if (!n) return 'ZAR 0';
     const num = parseFloat(n);
-    if (num >= 1000000) return `$${(num / 1000000).toFixed(1)}M`;
-    if (num >= 1000) return `$${(num / 1000).toFixed(0)}K`;
-    return `$${num}`;
+    if (num >= 1000000) return `ZAR ${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `ZAR ${(num / 1000).toFixed(0)}K`;
+    return `ZAR ${num}`;
   }
 
   return (
     <div className="page" style={{ paddingTop: 0 }}>
-      {/* Hero */}
       <div className="hero">
         <div className="hero-tag">◈ Prediction Exchange</div>
         <h1 className="hero-title">
           Trade on the future of<br /><span className="accent">Crypto & Finance</span>
         </h1>
         <p className="hero-sub">
-          Buy and sell shares in outcomes. Every share pays $1 if correct. The market price reflects collective probability.
+          Buy and sell shares in outcomes. Every share pays ZAR 1 if correct. The market price reflects collective probability.
         </p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
           <button className="btn btn-primary btn-lg" onClick={() => navigate('markets')}>Explore Markets</button>
         </div>
-
         {stats && (
           <div className="hero-stats">
-            <div>
-              <span className="hero-stat-value">{stats.openMarkets}</span>
-              <span className="hero-stat-label">Active Markets</span>
-            </div>
-            <div>
-              <span className="hero-stat-value">{fmtBig(stats.totalVolume)}</span>
-              <span className="hero-stat-label">Total Volume</span>
-            </div>
-            <div>
-              <span className="hero-stat-value">{stats.totalUsers}</span>
-              <span className="hero-stat-label">Traders</span>
-            </div>
-            <div>
-              <span className="hero-stat-value">{stats.totalTrades}</span>
-              <span className="hero-stat-label">Trades</span>
-            </div>
+            <div><span className="hero-stat-value">{stats.openMarkets}</span><span className="hero-stat-label">Active Markets</span></div>
+            <div><span className="hero-stat-value">{fmtBig(stats.totalVolume)}</span><span className="hero-stat-label">Total Volume</span></div>
+            <div><span className="hero-stat-value">{stats.totalUsers}</span><span className="hero-stat-label">Traders</span></div>
+            <div><span className="hero-stat-value">{stats.totalTrades}</span><span className="hero-stat-label">Trades</span></div>
           </div>
         )}
       </div>
 
-      {/* How It Works */}
       <div style={{ marginBottom: 48 }}>
-        <div className="section-header">
-          <h2 className="section-title">How It Works</h2>
-        </div>
+        <div className="section-header"><h2 className="section-title">How It Works</h2></div>
         <div className="grid-3">
           {[
             { icon: '📊', title: 'Pick a Market', desc: 'Browse open markets for upcoming crypto or financial events.' },
-            { icon: '💰', title: 'Buy Shares', desc: 'Buy YES or NO shares. Prices reflect the crowd\'s probability estimate.' },
-            { icon: '✅', title: 'Get Paid', desc: 'When a market resolves, winning shares pay out $1 each. Profit from being right.' }
+            { icon: '💰', title: 'Buy Shares', desc: "Buy YES or NO shares. Prices reflect the crowd's probability estimate." },
+            { icon: '✅', title: 'Get Paid', desc: 'When a market resolves, winning shares pay out ZAR 1 each. Profit from being right.' }
           ].map((s, i) => (
             <div key={i} className="card" style={{ textAlign: 'center', padding: '28px 20px' }}>
               <div style={{ fontSize: '2rem', marginBottom: 12 }}>{s.icon}</div>
@@ -84,28 +67,20 @@ export default function MarketsPage() {
         </div>
       </div>
 
-      {/* Markets */}
       <div>
         <div className="section-header">
           <h2 className="section-title">Open Markets</h2>
           <span style={{ fontSize: '0.85rem', color: 'var(--text2)' }}>{markets.length} markets</span>
         </div>
-
         <div className="filter-bar">
           {categories.map(c => (
             <button key={c} className={`filter-chip ${category === c ? 'active' : ''}`} onClick={() => setCategory(c)}>{c}</button>
           ))}
           <div className="search-wrap">
             <span className="search-icon">🔍</span>
-            <input
-              className="input search-input"
-              placeholder="Search markets..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
+            <input className="input search-input" placeholder="Search markets..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
         </div>
-
         {loading ? (
           <div style={{ textAlign: 'center', padding: '64px', color: 'var(--text2)' }}>
             <div className="spinner" style={{ width: 32, height: 32, margin: '0 auto 12px' }} />
