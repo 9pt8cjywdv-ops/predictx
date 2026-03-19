@@ -12,6 +12,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000' }));
 app.use(express.json());
 
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'No token provided' });
@@ -21,7 +23,7 @@ function authMiddleware(req, res, next) {
 
 async function seedMarkets() {
   const { rows } = await pool.query('SELECT COUNT(*) FROM markets');
-  if (parseInt(rows[0].count) > 0) return;
+  if (parseInt(rows[0].count) > 0) { console.log('Markets already seeded'); return; }
   const markets = [
     { title: 'Will Bitcoin exceed $200,000 by end of 2026?', description: 'Resolves YES if BTC/USD price on any major exchange exceeds $200,000 at any point before December 31, 2026.', category: 'Crypto', asset: 'BTC', yes_price: 0.58, no_price: 0.42, volume: 3200000, liquidity: 520000, end_date: '2026-12-31', yes_shares: 175000, no_shares: 128000, source: 'CoinGecko API' },
     { title: 'Will Ethereum reach $10,000 in 2026?', description: 'Resolves YES if ETH/USD price on any major exchange exceeds $10,000 at any point before December 31, 2026.', category: 'Crypto', asset: 'ETH', yes_price: 0.42, no_price: 0.58, volume: 1750000, liquidity: 290000, end_date: '2026-12-31', yes_shares: 95000, no_shares: 132000, source: 'CoinGecko API' },
@@ -33,8 +35,10 @@ async function seedMarkets() {
     { title: 'Will US inflation drop below 2% by end of 2026?', description: 'Resolves YES if the US CPI year-over-year inflation rate drops below 2.0% in any monthly BLS report before December 31, 2026.', category: 'Finance', asset: 'CPI', yes_price: 0.45, no_price: 0.55, volume: 1420000, liquidity: 280000, end_date: '2026-12-31', yes_shares: 112000, no_shares: 137000, source: 'Bureau of Labor Statistics' },
   ];
   for (const m of markets) {
-    await pool.query(`INSERT INTO markets (id,title,description,category,asset,yes_price,no_price,volume,liquidity,end_date,status,resolution_source,total_shares_yes,total_shares_no,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'open',$11,$12,$13,NOW())`,
-      [uuidv4(), m.title, m.description, m.category, m.asset, m.yes_price, m.no_price, m.volume, m.liquidity, m.end_date, m.source, m.yes_shares, m.no_shares]);
+    await pool.query(
+      `INSERT INTO markets (id,title,description,category,asset,yes_price,no_price,volume,liquidity,end_date,status,resolution_source,total_shares_yes,total_shares_no,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'open',$11,$12,$13,NOW())`,
+      [uuidv4(), m.title, m.description, m.category, m.asset, m.yes_price, m.no_price, m.volume, m.liquidity, m.end_date, m.source, m.yes_shares, m.no_shares]
+    );
   }
   console.log('🌱 Markets seeded');
 }
@@ -72,8 +76,8 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
 
 app.get('/api/markets', async (req, res) => {
   const { category, search } = req.query;
-  let q = 'SELECT * FROM markets WHERE status=$1';
-  const params = ['open'];
+  let q = "SELECT * FROM markets WHERE status='open'";
+  const params = [];
   if (category && category !== 'All') { params.push(category); q += ` AND category=$${params.length}`; }
   if (search) { params.push(`%${search}%`); q += ` AND title ILIKE $${params.length}`; }
   q += ' ORDER BY created_at DESC';
@@ -92,7 +96,7 @@ app.post('/api/markets', authMiddleware, async (req, res) => {
   const { title, description, category, asset, endDate, resolutionSource } = req.body;
   if (!title || !description || !category || !endDate) return res.status(400).json({ error: 'Missing required fields' });
   const id = uuidv4();
-  await pool.query('INSERT INTO markets (id,title,description,category,asset,yes_price,no_price,volume,liquidity,end_date,status,resolution_source,created_by,total_shares_yes,total_shares_no) VALUES ($1,$2,$3,$4,$5,0.50,0.50,0,0,$6,\'open\',$7,$8,1000,1000)',
+  await pool.query("INSERT INTO markets (id,title,description,category,asset,yes_price,no_price,volume,liquidity,end_date,status,resolution_source,created_by,total_shares_yes,total_shares_no) VALUES ($1,$2,$3,$4,$5,0.50,0.50,0,0,$6,'open',$7,$8,1000,1000)",
     [id, title, description, category, asset || 'CUSTOM', endDate, resolutionSource || 'Admin', req.user.id]);
   const { rows } = await pool.query('SELECT * FROM markets WHERE id=$1', [id]);
   res.status(201).json(formatMarket(rows[0]));
@@ -123,7 +127,7 @@ app.post('/api/trade', authMiddleware, async (req, res) => {
   await pool.query('UPDATE markets SET total_shares_yes=$1,total_shares_no=$2,yes_price=$3,no_price=$4,volume=$5,liquidity=$6 WHERE id=$7',
     [newYesShares, newNoShares, newYesPrice, newNoPrice, newVolume, newLiquidity, marketId]);
   const tradeId = uuidv4();
-  await pool.query('INSERT INTO trades (id,user_id,market_id,outcome,shares,price,amount,type) VALUES ($1,$2,$3,$4,$5,$6,$7,\'buy\')',
+  await pool.query("INSERT INTO trades (id,user_id,market_id,outcome,shares,price,amount,type) VALUES ($1,$2,$3,$4,$5,$6,$7,'buy')",
     [tradeId, user.id, marketId, outcome, shares, avgPrice, amount]);
   await pool.query(`INSERT INTO positions (id,user_id,market_id,outcome,shares,avg_price) VALUES ($1,$2,$3,$4,$5,$6)
     ON CONFLICT (user_id,market_id,outcome) DO UPDATE SET shares=positions.shares+$5, avg_price=((positions.avg_price*positions.shares)+($5*$6))/(positions.shares+$5)`,
@@ -153,7 +157,7 @@ app.post('/api/trade/sell', authMiddleware, async (req, res) => {
   if (newShares <= 0) await pool.query('DELETE FROM positions WHERE user_id=$1 AND market_id=$2 AND outcome=$3', [req.user.id, marketId, outcome]);
   else await pool.query('UPDATE positions SET shares=$1 WHERE user_id=$2 AND market_id=$3 AND outcome=$4', [newShares, req.user.id, marketId, outcome]);
   const tradeId = uuidv4();
-  await pool.query('INSERT INTO trades (id,user_id,market_id,outcome,shares,price,amount,type) VALUES ($1,$2,$3,$4,$5,$6,$7,\'sell\')', [tradeId, req.user.id, marketId, outcome, shares, price, proceeds]);
+  await pool.query("INSERT INTO trades (id,user_id,market_id,outcome,shares,price,amount,type) VALUES ($1,$2,$3,$4,$5,$6,$7,'sell')", [tradeId, req.user.id, marketId, outcome, shares, price, proceeds]);
   res.json({ success: true, proceeds, user: { balance: newBalance }, market: { yesPrice: newYesPrice, noPrice: newNoPrice } });
 });
 
@@ -189,7 +193,7 @@ app.get('/api/leaderboard', async (req, res) => {
 
 app.get('/api/stats', async (req, res) => {
   const [markets, users, trades] = await Promise.all([
-    pool.query('SELECT COUNT(*) FROM markets WHERE status=$1', ['open']),
+    pool.query("SELECT COUNT(*) FROM markets WHERE status='open'"),
     pool.query('SELECT COUNT(*) FROM users'),
     pool.query('SELECT COUNT(*), COALESCE(SUM(amount),0) as vol FROM trades')
   ]);
@@ -199,7 +203,7 @@ app.get('/api/stats', async (req, res) => {
 app.post('/api/markets/:id/resolve', authMiddleware, async (req, res) => {
   const { outcome } = req.body;
   if (!['YES', 'NO'].includes(outcome)) return res.status(400).json({ error: 'Invalid outcome' });
-  await pool.query('UPDATE markets SET status=\'resolved\',resolution=$1 WHERE id=$2', [outcome, req.params.id]);
+  await pool.query("UPDATE markets SET status='resolved',resolution=$1 WHERE id=$2", [outcome, req.params.id]);
   const { rows: winners } = await pool.query('SELECT * FROM positions WHERE market_id=$1 AND outcome=$2', [req.params.id, outcome]);
   for (const p of winners) await pool.query('UPDATE users SET balance=balance+$1 WHERE id=$2', [parseFloat(p.shares), p.user_id]);
   await pool.query('DELETE FROM positions WHERE market_id=$1', [req.params.id]);
@@ -217,7 +221,9 @@ function formatTrade(t) {
 async function start() {
   await initDB();
   await seedMarkets();
-  app.listen(PORT, () => { console.log(`🚀 PredictX running on port ${PORT}`); });
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 PredictX running on port ${PORT}`);
+  });
 }
 
 start();
