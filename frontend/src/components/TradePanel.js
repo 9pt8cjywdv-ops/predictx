@@ -6,7 +6,7 @@ export default function TradePanel({ market, onTraded }) {
   const { user, setUser, showToast, setAuthModal, refreshUser } = useApp();
   const [outcome, setOutcome] = useState('YES');
   const [amount, setAmount] = useState('');
-  const [mode, setMode] = useState('buy'); // 'buy' | 'sell'
+  const [mode, setMode] = useState('buy');
   const [loading, setLoading] = useState(false);
 
   const price = outcome === 'YES' ? market.yesPrice : market.noPrice;
@@ -14,13 +14,9 @@ export default function TradePanel({ market, onTraded }) {
   const potentialPayout = shares * 1.0;
   const potentialProfit = potentialPayout - parseFloat(amount || 0);
 
-  // Sell mode: find user's position
-  const position = null; // handled by parent
-
   async function executeTrade() {
     if (!user) { setAuthModal('login'); return; }
     if (!amount || parseFloat(amount) <= 0) return;
-
     setLoading(true);
     try {
       let result;
@@ -31,7 +27,7 @@ export default function TradePanel({ market, onTraded }) {
       } else {
         result = await api.sell({ marketId: market.id, outcome, shares: parseFloat(amount) });
         setUser(result.user);
-        showToast(`Sold ${amount} ${outcome} shares for $${result.proceeds}`);
+        showToast(`Sold ${amount} ${outcome} shares for ZAR ${result.proceeds}`);
       }
       setAmount('');
       if (onTraded) onTraded(result);
@@ -49,14 +45,8 @@ export default function TradePanel({ market, onTraded }) {
       <div className="card-header">
         <span className="card-title">Trade</span>
         <div style={{ display: 'flex', gap: 4, background: 'var(--bg3)', borderRadius: 8, padding: 3 }}>
-          <button
-            className="btn btn-sm"
-            style={{ background: mode === 'buy' ? 'var(--bg4)' : 'transparent', color: mode === 'buy' ? 'var(--text)' : 'var(--text2)', border: 'none' }}
-            onClick={() => setMode('buy')}>Buy</button>
-          <button
-            className="btn btn-sm"
-            style={{ background: mode === 'sell' ? 'var(--bg4)' : 'transparent', color: mode === 'sell' ? 'var(--text)' : 'var(--text2)', border: 'none' }}
-            onClick={() => setMode('sell')}>Sell</button>
+          <button className="btn btn-sm" style={{ background: mode === 'buy' ? 'var(--bg4)' : 'transparent', color: mode === 'buy' ? 'var(--text)' : 'var(--text2)', border: 'none' }} onClick={() => setMode('buy')}>Buy</button>
+          <button className="btn btn-sm" style={{ background: mode === 'sell' ? 'var(--bg4)' : 'transparent', color: mode === 'sell' ? 'var(--text)' : 'var(--text2)', border: 'none' }} onClick={() => setMode('sell')}>Sell</button>
         </div>
       </div>
 
@@ -70,39 +60,25 @@ export default function TradePanel({ market, onTraded }) {
       {market.status === 'open' && (
         <>
           <div className="outcome-btns">
-            <button
-              className={`outcome-btn outcome-btn-yes ${outcome === 'YES' ? 'active' : ''}`}
-              onClick={() => setOutcome('YES')}>
+            <button className={`outcome-btn outcome-btn-yes ${outcome === 'YES' ? 'active' : ''}`} onClick={() => setOutcome('YES')}>
               <div style={{ fontSize: '1.25rem', fontFamily: 'var(--font-mono)', fontWeight: 800 }}>{Math.round(market.yesPrice * 100)}¢</div>
               <div style={{ fontSize: '0.75rem', marginTop: 2 }}>YES</div>
             </button>
-            <button
-              className={`outcome-btn outcome-btn-no ${outcome === 'NO' ? 'active' : ''}`}
-              onClick={() => setOutcome('NO')}>
+            <button className={`outcome-btn outcome-btn-no ${outcome === 'NO' ? 'active' : ''}`} onClick={() => setOutcome('NO')}>
               <div style={{ fontSize: '1.25rem', fontFamily: 'var(--font-mono)', fontWeight: 800 }}>{Math.round(market.noPrice * 100)}¢</div>
               <div style={{ fontSize: '0.75rem', marginTop: 2 }}>NO</div>
             </button>
           </div>
 
           <div className="form-group">
-            <label className="label">{mode === 'buy' ? 'Amount (USD)' : 'Shares to sell'}</label>
-            <input
-              className="input"
-              type="number"
-              min="0"
-              step={mode === 'buy' ? '1' : '0.01'}
-              placeholder={mode === 'buy' ? '$0.00' : '0 shares'}
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-            />
+            <label className="label">{mode === 'buy' ? 'Amount (ZAR)' : 'Shares to sell'}</label>
+            <input className="input" type="number" min="0" step={mode === 'buy' ? '1' : '0.01'} placeholder={mode === 'buy' ? 'ZAR 0.00' : '0 shares'} value={amount} onChange={e => setAmount(e.target.value)} />
           </div>
 
           {mode === 'buy' && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {quickAmounts.map(a => (
-                <button key={a} className="btn btn-secondary btn-sm" onClick={() => setAmount(String(a))}>
-                  ${a}
-                </button>
+                <button key={a} className="btn btn-secondary btn-sm" onClick={() => setAmount(String(a))}>ZAR {a}</button>
               ))}
             </div>
           )}
@@ -119,7 +95,7 @@ export default function TradePanel({ market, onTraded }) {
               </div>
               <div className="order-row">
                 <span className="text-muted">Max payout</span>
-                <span className="text-mono text-green">${potentialPayout.toFixed(2)}</span>
+                <span className="text-mono text-green">ZAR {potentialPayout.toFixed(2)}</span>
               </div>
               <div className="order-row">
                 <span>Potential profit</span>
@@ -133,19 +109,12 @@ export default function TradePanel({ market, onTraded }) {
           {user && (
             <div style={{ fontSize: '0.8rem', color: 'var(--text2)', display: 'flex', justifyContent: 'space-between' }}>
               <span>Balance</span>
-              <span className="text-mono text-green">${user.balance?.toFixed(2)}</span>
+              <span className="text-mono text-green">ZAR {user.balance?.toFixed(2)}</span>
             </div>
           )}
 
-          <button
-            className={`btn w-full ${outcome === 'YES' ? 'btn-primary' : 'btn-danger'}`}
-            onClick={executeTrade}
-            disabled={loading || !amount || parseFloat(amount) <= 0}
-            style={outcome === 'NO' ? { background: 'var(--red)' } : {}}>
-            {loading ? <span className="spinner" /> : (
-              !user ? 'Connect to trade' :
-              `${mode === 'buy' ? 'Buy' : 'Sell'} ${outcome}`
-            )}
+          <button className={`btn w-full ${outcome === 'YES' ? 'btn-primary' : 'btn-danger'}`} onClick={executeTrade} disabled={loading || !amount || parseFloat(amount) <= 0} style={outcome === 'NO' ? { background: 'var(--red)' } : {}}>
+            {loading ? <span className="spinner" /> : (!user ? 'Connect to trade' : `${mode === 'buy' ? 'Buy' : 'Sell'} ${outcome}`)}
           </button>
         </>
       )}
