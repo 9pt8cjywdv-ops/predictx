@@ -1,0 +1,1322 @@
+// =============================================================================
+// B-BBEE Verification Platform — relational model
+//
+// Layering (see docs/ARCHITECTURE.md):
+//   L1 Regulatory source of truth  -> Regulatory*, SectorCode, ScorecardTemplate,
+//                                     ScorecardElement/Indicator, CalculationRule,
+//                                     RecognitionTable, EntityClassificationRule
+//   L2 AI verification agents      -> AgentRun, VerificationFinding, DocumentExtraction
+//   L3 Deterministic calculation   -> CalculationInput, CalculationResult,
+//                                     PriorityElementResult, ScorecardResult
+//   L4 Human review                -> Override, TechnicalReview, ReviewFinding,
+//                                     VerificationSnapshot, AuditEvent
+//
+// Money is stored as Decimal(20,2) in ZAR; percentages as Decimal(9,6) fractions
+// (0.25 == 25%). Points as Decimal(10,4).
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Identity, tenancy, RBAC
+// -----------------------------------------------------------------------------
+
+enum Role {
+  ADMINISTRATOR
+  VERIFICATION_MANAGER
+  VERIFICATION_ANALYST
+  TECHNICAL_SIGNATORY
+  READ_ONLY_REVIEWER
+  CLIENT_USER
+}
+
+/// The verification agency (tenant). All client data is partitioned by organisation.
+model Organisation {
+  id                 String   @id @default(cuid())
+  name               String
+  sanasAccreditation String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  users           User[]
+  clients         Client[]
+  rolePermissions RolePermission[]
+  auditEvents     AuditEvent[]
+}
+
+model User {
+  id             String    @id @default(cuid())
+  organisationId String
+  email          String    @unique
+  name           String
+  passwordHash   String
+  role           Role
+  isActive       Boolean   @default(true)
+  failedLogins   Int       @default(0)
+  lockedUntil    DateTime?
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organisation Organisation       @relation(fields: [organisationId], references: [id])
+  sessions     Session[]
+  clientAccess ClientUserAccess[]
+
+  engagementsManaged    VerificationEngagement[] @relation("EngagementManager")
+  engagementsAnalysed   VerificationEngagement[] @relation("EngagementAnalyst")
+  engagementsSignatory  VerificationEngagement[] @relation("EngagementSignatory")
+  documentsUploaded     DocumentVersion[]
+  evidenceConfirmed     EvidenceItem[]           @relation("EvidenceConfirmedBy")
+  overrides             Override[]
+  queriesAssigned       VerificationQuery[]      @relation("QueryAssignee")
+  queryResponses        QueryResponse[]
+  technicalReviews      TechnicalReview[]
+  regulatoryApprovals   RegulatoryVersion[]      @relation("RegulatoryApprover")
+  classificationChanges Document[]               @relation("DocumentClassifiedBy")
+
+  @@index([organisationId])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  /// SHA-256 of the opaque bearer token. The raw token only lives in the cookie.
+  tokenHash  String   @unique
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Configurable permission matrix. Seeded with defaults (src/lib/rbac/permissions.ts).
+model RolePermission {
+  id             String @id @default(cuid())
+  organisationId String
+  role           Role
+  permission     String
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+
+  @@unique([organisationId, role, permission])
+}
+
+/// CLIENT_USER accounts may only see engagements of clients granted here.
+model ClientUserAccess {
+  id        String   @id @default(cuid())
+  userId    String
+  clientId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientId])
+}
+
+// -----------------------------------------------------------------------------
+// Clients, measured entities, engagements
+// -----------------------------------------------------------------------------
+
+model Client {
+  id                 String   @id @default(cuid())
+  organisationId     String
+  name               String
+  registrationNumber String?
+  contactName        String?
+  contactEmail       String?
+  /// POPIA: retention end date after which deletion workflow is triggered.
+  retentionUntil     DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organisation    Organisation             @relation(fields: [organisationId], references: [id])
+  measuredEntities MeasuredEntity[]
+  engagements     VerificationEngagement[]
+  userAccess      ClientUserAccess[]
+
+  @@index([organisationId])
+}
+
+enum EntityClassification {
+  EME
+  QSE
+  GENERIC
+  UNDETERMINED
+}
+
+model MeasuredEntity {
+  id                 String   @id @default(cuid())
+  clientId           String
+  legalName          String
+  tradingName        String?
+  registrationNumber String?
+  vatNumber          String?
+  industryDescription String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  client      Client                   @relation(fields: [clientId], references: [id])
+  engagements VerificationEngagement[]
+
+  @@index([clientId])
+}
+
+enum EngagementStatus {
+  DRAFT
+  EVIDENCE_COLLECTION
+  ANALYSIS
+  AWAITING_CLIENT
+  VERIFICATION_MANAGER_REVIEW
+  TECHNICAL_REVIEW
+  RETURNED_FOR_CORRECTION
+  APPROVED
+  CLOSED
+}
+
+model VerificationEngagement {
+  id                    String               @id @default(cuid())
+  reference             String               @unique
+  clientId              String
+  measuredEntityId      String
+  status                EngagementStatus     @default(DRAFT)
+  managerId             String?
+  analystId             String?
+  signatoryId           String?
+  /// Regulatory framework version determined (and human-confirmed) as applicable.
+  regulatoryVersionId   String?
+  regulatoryConfirmedAt DateTime?
+  scorecardTemplateId   String?
+  entityClassification  EntityClassification @default(UNDETERMINED)
+  classificationBasis   Json?
+  /// Annual total revenue for the measurement period as verified (ZAR).
+  verifiedTurnover      Decimal?             @db.Decimal(20, 2)
+  /// Date the previous certificate expires; drives the re-verification dashboard.
+  previousCertificateExpiry DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  client            Client             @relation(fields: [clientId], references: [id])
+  measuredEntity    MeasuredEntity     @relation(fields: [measuredEntityId], references: [id])
+  manager           User?              @relation("EngagementManager", fields: [managerId], references: [id])
+  analyst           User?              @relation("EngagementAnalyst", fields: [analystId], references: [id])
+  signatory         User?              @relation("EngagementSignatory", fields: [signatoryId], references: [id])
+  regulatoryVersion RegulatoryVersion? @relation(fields: [regulatoryVersionId], references: [id])
+  scorecardTemplate ScorecardTemplate? @relation(fields: [scorecardTemplateId], references: [id])
+
+  measurementPeriods MeasurementPeriod[]
+  documents          Document[]
+  evidenceItems      EvidenceItem[]
+  findings           VerificationFinding[]
+  queries            VerificationQuery[]
+  calculationInputs  CalculationInput[]
+  calculationResults CalculationResult[]
+  scorecards         Scorecard[]
+  technicalReviews   TechnicalReview[]
+  overrides          Override[]
+  reports            Report[]
+  snapshots          VerificationSnapshot[]
+  agentRuns          AgentRun[]
+  ownershipStructures OwnershipStructure[]
+  employees          Employee[]
+  suppliers          Supplier[]
+  developmentBeneficiaries DevelopmentBeneficiary[]
+  sedContributions   SEDContribution[]
+  auditEvents        AuditEvent[]
+
+  @@index([clientId])
+  @@index([status])
+}
+
+model MeasurementPeriod {
+  id               String   @id @default(cuid())
+  engagementId     String
+  label            String
+  startDate        DateTime @db.Date
+  endDate          DateTime @db.Date
+  /// Financial year end used for the measured entity.
+  financialYearEnd DateTime @db.Date
+  isPrimary        Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId])
+}
+
+// -----------------------------------------------------------------------------
+// Documents (originals are immutable; content-addressed in object storage)
+// -----------------------------------------------------------------------------
+
+enum DocumentClass {
+  CIPC
+  FINANCIAL_STATEMENTS
+  MANAGEMENT_ACCOUNTS
+  TRIAL_BALANCE
+  GENERAL_LEDGER
+  PAYROLL
+  EMPLOYEE_LISTING
+  EEA2
+  EEA4
+  ORGANOGRAM
+  WSP
+  ATR
+  TRAINING_INVOICE
+  PROOF_OF_PAYMENT
+  LEARNERSHIP_AGREEMENT
+  BURSARY_AGREEMENT
+  SUPPLIER_LISTING
+  SUPPLIER_CERTIFICATE
+  AFFIDAVIT
+  SHARE_CERTIFICATE
+  SHARE_REGISTER
+  SHAREHOLDER_AGREEMENT
+  MOI
+  TRUST_DEED
+  BENEFICIARY_DOCUMENTATION
+  ENTERPRISE_DEVELOPMENT
+  SUPPLIER_DEVELOPMENT
+  SED_DOCUMENTATION
+  BANK_STATEMENT
+  INVOICE
+  CONFIRMATION_LETTER
+  UNKNOWN
+}
+
+enum ClassificationSource {
+  HEURISTIC
+  AI_AGENT
+  HUMAN
+}
+
+enum ScanStatus {
+  PENDING
+  CLEAN
+  INFECTED
+  NOT_SCANNED
+  REJECTED
+}
+
+enum ProcessingStatus {
+  RECEIVED
+  QUARANTINED
+  CLASSIFIED
+  EXTRACTED
+  FAILED
+  DUPLICATE
+}
+
+enum ScorecardElementCode {
+  OWNERSHIP
+  MANAGEMENT_CONTROL
+  SKILLS_DEVELOPMENT
+  PREFERENTIAL_PROCUREMENT
+  SUPPLIER_DEVELOPMENT
+  ENTERPRISE_DEVELOPMENT
+  SOCIO_ECONOMIC_DEVELOPMENT
+  SECTOR_SPECIFIC
+  GENERAL
+}
+
+/// Logical document within an engagement. Its bytes live in DocumentVersion(s).
+model Document {
+  id                   String               @id @default(cuid())
+  engagementId         String
+  title                String
+  documentClass        DocumentClass        @default(UNKNOWN)
+  classificationSource ClassificationSource @default(HEURISTIC)
+  classificationConfidence Confidence       @default(UNVERIFIED)
+  classifiedById       String?
+  classifiedAt         DateTime?
+  elementHint          ScorecardElementCode?
+  status               ProcessingStatus     @default(RECEIVED)
+  /// Set when the content hash matches an earlier document in the engagement.
+  duplicateOfId        String?
+  /// Parent ZIP pack document this file was expanded from.
+  sourceArchiveId      String?
+  /// Soft deletion only; originals are never removed while retention applies.
+  deletedAt            DateTime?
+  deletedReason        String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  engagement    VerificationEngagement @relation(fields: [engagementId], references: [id])
+  classifiedBy  User?                  @relation("DocumentClassifiedBy", fields: [classifiedById], references: [id])
+  duplicateOf   Document?              @relation("DocumentDuplicate", fields: [duplicateOfId], references: [id])
+  duplicates    Document[]             @relation("DocumentDuplicate")
+  sourceArchive Document?              @relation("ArchiveMember", fields: [sourceArchiveId], references: [id])
+  archiveMembers Document[]            @relation("ArchiveMember")
+  versions      DocumentVersion[]
+  queryResponses QueryResponseDocument[]
+
+  @@index([engagementId])
+  @@index([documentClass])
+}
+
+model DocumentVersion {
+  id             String     @id @default(cuid())
+  documentId     String
+  versionNumber  Int
+  originalFilename String
+  mimeType       String
+  detectedType   String?
+  sizeBytes      Int
+  /// SHA-256 of the raw bytes (hex). Storage key is derived from it.
+  sha256         String
+  storageKey     String
+  scanStatus     ScanStatus @default(PENDING)
+  scanDetail     String?
+  uploadedById   String
+  uploadedAt     DateTime   @default(now())
+
+  document    Document             @relation(fields: [documentId], references: [id])
+  uploadedBy  User                 @relation(fields: [uploadedById], references: [id])
+  extractions DocumentExtraction[]
+  evidence    EvidenceItem[]
+
+  @@unique([documentId, versionNumber])
+  @@index([sha256])
+}
+
+enum ExtractionMethod {
+  NATIVE_TEXT
+  SPREADSHEET_PARSE
+  DOCX_PARSE
+  OCR
+  AI_AGENT
+  MANUAL_ENTRY
+}
+
+model DocumentExtraction {
+  id                String           @id @default(cuid())
+  documentVersionId String
+  method            ExtractionMethod
+  /// Extractor implementation + version, for reproducibility.
+  extractorVersion  String
+  pageCount         Int?
+  text              String?
+  /// Structured tables: [{ sheet, headers, rows: [[...]] }]
+  tables            Json?
+  /// Detected measurement-period dates, parties, signatures, etc.
+  metadata          Json?
+  /// Hash of (documentVersion.sha256 + extractorVersion) — cache key for reuse.
+  cacheKey          String           @unique
+  createdAt         DateTime         @default(now())
+
+  documentVersion DocumentVersion @relation(fields: [documentVersionId], references: [id])
+
+  @@index([documentVersionId])
+}
+
+// -----------------------------------------------------------------------------
+// Evidence & lineage
+// -----------------------------------------------------------------------------
+
+enum Confidence {
+  HIGH
+  MEDIUM
+  LOW
+  UNVERIFIED
+}
+
+enum EvidenceStatus {
+  VERIFIED
+  PARTIALLY_VERIFIED
+  INSUFFICIENT
+  INVALID
+  OUTSIDE_PERIOD
+  DUPLICATE
+  CONFLICTING
+  REVIEW_REQUIRED
+}
+
+enum ReviewStatus {
+  UNREVIEWED
+  CONFIRMED
+  REJECTED
+  OVERRIDDEN
+}
+
+/// One extracted, traceable data point. See docs/LINEAGE.md.
+model EvidenceItem {
+  id                String           @id @default(cuid())
+  engagementId      String
+  documentVersionId String
+  element           ScorecardElementCode?
+  indicatorCode     String?
+  /// Semantic key of the data point, e.g. "supplier.spend", "employee.race".
+  dataKey           String
+  label             String
+  /// Location within the source: { page?, sheet?, row?, column?, cell?, bbox?, textSpan? }
+  sourceLocation    Json
+  originalValue     String
+  normalisedValue   Json
+  /// Unit of normalisedValue: ZAR, PERCENT, DATE, COUNT, TEXT, BOOLEAN.
+  unit              String
+  extractionMethod  ExtractionMethod
+  confidence        Confidence       @default(UNVERIFIED)
+  status            EvidenceStatus   @default(REVIEW_REQUIRED)
+  reviewStatus      ReviewStatus     @default(UNREVIEWED)
+  confirmedById     String?
+  confirmedAt       DateTime?
+  agentRunId        String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  engagement      VerificationEngagement @relation(fields: [engagementId], references: [id])
+  documentVersion DocumentVersion        @relation(fields: [documentVersionId], references: [id])
+  confirmedBy     User?                  @relation("EvidenceConfirmedBy", fields: [confirmedById], references: [id])
+  agentRun        AgentRun?              @relation(fields: [agentRunId], references: [id])
+  links           EvidenceLink[]
+
+  @@index([engagementId, element])
+  @@index([documentVersionId])
+}
+
+enum EvidenceLinkTarget {
+  CALCULATION_INPUT
+  FINDING
+  QUERY
+  SHAREHOLDER
+  EMPLOYEE
+  TRAINING_RECORD
+  SUPPLIER
+  PROCUREMENT_TRANSACTION
+  DEVELOPMENT_CONTRIBUTION
+  SED_CONTRIBUTION
+}
+
+/// Polymorphic link from evidence to whatever it supports.
+model EvidenceLink {
+  id             String             @id @default(cuid())
+  evidenceItemId String
+  targetType     EvidenceLinkTarget
+  targetId       String
+  /// SUPPORTS | CONTRADICTS | PARTIALLY_SUPPORTS
+  relation       String             @default("SUPPORTS")
+  createdAt      DateTime           @default(now())
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceItemId, targetType, targetId])
+  @@index([targetType, targetId])
+}
+
+// -----------------------------------------------------------------------------
+// Regulatory source of truth (Layer 1)
+// -----------------------------------------------------------------------------
+
+enum RegulatoryDocumentType {
+  ACT
+  AMENDMENT_ACT
+  CODES_OF_GOOD_PRACTICE
+  SECTOR_CODE
+  CODE_AMENDMENT
+  GAZETTE_NOTICE
+  VERIFICATION_MANUAL
+  PRACTICE_GUIDE
+  CLARIFICATION
+  APPROVED_INTERPRETATION
+  OTHER_GUIDANCE
+}
+
+enum RegulatoryStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  PUBLISHED
+  SUPERSEDED
+  WITHDRAWN
+}
+
+/// A family of rules: e.g. "Generic Codes", "ICT Sector Code".
+model RegulatoryFramework {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  sectorCodeId String?
+  createdAt   DateTime @default(now())
+
+  sectorCode SectorCode?         @relation(fields: [sectorCodeId], references: [id])
+  versions   RegulatoryVersion[]
+  documents  RegulatoryDocument[]
+}
+
+model SectorCode {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  /// Description of in-scope activities, used by CODE_APPLICABILITY_AGENT.
+  scopeDescription String?
+  createdAt   DateTime @default(now())
+
+  frameworks RegulatoryFramework[]
+}
+
+/// An authoritative source document (Act, Code, Gazette notice, guidance).
+model RegulatoryDocument {
+  id             String                 @id @default(cuid())
+  frameworkId    String?
+  title          String
+  source         String
+  documentType   RegulatoryDocumentType
+  gazetteNumber  String?
+  noticeNumber   String?
+  publicationDate DateTime?             @db.Date
+  effectiveDate  DateTime?              @db.Date
+  expiryDate     DateTime?              @db.Date
+  sector         String?
+  version        String
+  status         RegulatoryStatus       @default(DRAFT)
+  supersededById String?
+  /// SHA-256 + storage key of the uploaded authoritative PDF.
+  sha256         String?
+  storageKey     String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  framework    RegulatoryFramework?  @relation(fields: [frameworkId], references: [id])
+  supersededBy RegulatoryDocument?   @relation("RegDocSupersedes", fields: [supersededById], references: [id])
+  supersedes   RegulatoryDocument[]  @relation("RegDocSupersedes")
+  provisions   RegulatoryProvision[]
+  versionLinks RegulatoryVersionDocument[]
+}
+
+/// A dated, approvable configuration of a framework. Verification of a period
+/// uses the version whose [validFrom, validTo) window applies to that period.
+model RegulatoryVersion {
+  id            String           @id @default(cuid())
+  frameworkId   String
+  label         String
+  status        RegulatoryStatus @default(DRAFT)
+  /// Null while DRAFT if the effective date is not yet confirmed; required to publish.
+  validFrom     DateTime?        @db.Date
+  validTo       DateTime?        @db.Date
+  publishedOn   DateTime?        @db.Date
+  supersedesId  String?          @unique
+  approvedById  String?
+  approvedAt    DateTime?
+  approvalNotes String?
+  /// Result of the last golden-case regression run against this version.
+  regressionStatus String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  framework    RegulatoryFramework @relation(fields: [frameworkId], references: [id])
+  supersedes   RegulatoryVersion?  @relation("RegVersionSupersedes", fields: [supersedesId], references: [id])
+  supersededBy RegulatoryVersion?  @relation("RegVersionSupersedes")
+  approvedBy   User?               @relation("RegulatoryApprover", fields: [approvedById], references: [id])
+
+  documents            RegulatoryVersionDocument[]
+  scorecardTemplates   ScorecardTemplate[]
+  calculationRules     CalculationRule[]
+  recognitionTables    RecognitionTable[]
+  classificationRules  EntityClassificationRule[]
+  engagements          VerificationEngagement[]
+
+  @@index([frameworkId, validFrom])
+}
+
+model RegulatoryVersionDocument {
+  regulatoryVersionId  String
+  regulatoryDocumentId String
+
+  regulatoryVersion  RegulatoryVersion  @relation(fields: [regulatoryVersionId], references: [id], onDelete: Cascade)
+  regulatoryDocument RegulatoryDocument @relation(fields: [regulatoryDocumentId], references: [id])
+
+  @@id([regulatoryVersionId, regulatoryDocumentId])
+}
+
+/// Addressable clause. Agents must cite provisions by id; fabricated references
+/// are impossible because citations are FK-validated against this table.
+model RegulatoryProvision {
+  id            String                @id @default(cuid())
+  documentId    String
+  /// Human citation key, e.g. "CoGP-S100-Annex100A-2.1".
+  reference     String
+  statement     String?
+  section       String?
+  subsection    String?
+  heading       String?
+  text          String
+  effectiveFrom DateTime?             @db.Date
+  effectiveTo   DateTime?             @db.Date
+  sector        String?
+  element       ScorecardElementCode?
+  indicatorCode String?
+  keywords      String[]
+  status        RegulatoryStatus      @default(DRAFT)
+  createdAt     DateTime              @default(now())
+
+  document         RegulatoryDocument          @relation(fields: [documentId], references: [id])
+  calculationRules CalculationRuleProvision[]
+
+  @@unique([documentId, reference])
+  @@index([element, indicatorCode])
+}
+
+// -----------------------------------------------------------------------------
+// Scorecard configuration (data-driven; tied to a RegulatoryVersion)
+// -----------------------------------------------------------------------------
+
+model ScorecardTemplate {
+  id                  String               @id @default(cuid())
+  regulatoryVersionId String
+  code                String
+  name                String
+  entityClassification EntityClassification
+  createdAt           DateTime             @default(now())
+
+  regulatoryVersion RegulatoryVersion        @relation(fields: [regulatoryVersionId], references: [id])
+  elements          ScorecardElement[]
+  engagements       VerificationEngagement[]
+  scorecards        Scorecard[]
+
+  @@unique([regulatoryVersionId, code])
+}
+
+model ScorecardElement {
+  id                 String               @id @default(cuid())
+  templateId         String
+  element            ScorecardElementCode
+  name               String
+  sortOrder          Int
+  /// Maximum available points (null => REGULATORY_CONFIGURATION_REQUIRED).
+  weighting          Decimal?             @db.Decimal(10, 4)
+  bonusAvailable     Decimal?             @db.Decimal(10, 4)
+  isPriorityElement  Boolean              @default(false)
+  /// Fraction of weighting required to pass the sub-minimum (e.g. 0.4).
+  subminimumFraction Decimal?             @db.Decimal(9, 6)
+  /// Structured priority rule (see src/lib/engine/priority.ts PriorityRuleConfig).
+  priorityRule       Json?
+  configurationStatus String              @default("REGULATORY_CONFIGURATION_REQUIRED")
+
+  template   ScorecardTemplate    @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  indicators ScorecardIndicator[]
+
+  @@unique([templateId, element])
+}
+
+model ScorecardIndicator {
+  id          String   @id @default(cuid())
+  elementId   String
+  code        String
+  name        String
+  sortOrder   Int
+  description String?
+
+  scorecardElement ScorecardElement  @relation(fields: [elementId], references: [id], onDelete: Cascade)
+  calculationRules CalculationRule[]
+
+  @@unique([elementId, code])
+}
+
+enum FormulaType {
+  PROPORTIONAL
+  BINARY_THRESHOLD
+  BANDED
+  CUSTOM_HANDLER
+}
+
+enum RoundingMethod {
+  NONE
+  HALF_UP_2DP
+  TRUNCATE_2DP
+  HALF_UP_0DP
+}
+
+/// Configuration for one indicator under one regulatory version.
+/// configurationStatus = REGULATORY_CONFIGURATION_REQUIRED blocks calculation.
+model CalculationRule {
+  id                  String         @id @default(cuid())
+  regulatoryVersionId String
+  indicatorId         String
+  indicatorCode       String
+  formulaType         FormulaType
+  /// Parameters for the handler: target, denominatorKey, bands, threshold...
+  parameters          Json
+  weighting           Decimal?       @db.Decimal(10, 4)
+  cap                 Decimal?       @db.Decimal(10, 4)
+  bonusRule           Json?
+  roundingMethod      RoundingMethod @default(NONE)
+  configurationStatus String         @default("REGULATORY_CONFIGURATION_REQUIRED")
+  notes               String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  regulatoryVersion RegulatoryVersion          @relation(fields: [regulatoryVersionId], references: [id])
+  indicator         ScorecardIndicator         @relation(fields: [indicatorId], references: [id])
+  provisions        CalculationRuleProvision[]
+  results           CalculationResult[]
+
+  @@unique([regulatoryVersionId, indicatorCode])
+}
+
+model CalculationRuleProvision {
+  calculationRuleId String
+  provisionId       String
+
+  calculationRule CalculationRule     @relation(fields: [calculationRuleId], references: [id], onDelete: Cascade)
+  provision       RegulatoryProvision @relation(fields: [provisionId], references: [id])
+
+  @@id([calculationRuleId, provisionId])
+}
+
+/// Version-controlled points -> level -> procurement recognition table.
+model RecognitionTable {
+  id                  String   @id @default(cuid())
+  regulatoryVersionId String
+  /// [{ level, minPoints, recognitionPercent }, ...] — see engine/recognition.ts.
+  bands               Json
+  /// Priority-element discount policy — see engine/priority.ts DiscountPolicy.
+  discountPolicy      Json?
+  configurationStatus String   @default("REGULATORY_CONFIGURATION_REQUIRED")
+  createdAt           DateTime @default(now())
+
+  regulatoryVersion RegulatoryVersion @relation(fields: [regulatoryVersionId], references: [id])
+
+  @@unique([regulatoryVersionId])
+}
+
+/// Turnover thresholds and automatic-recognition rules per version.
+model EntityClassificationRule {
+  id                  String   @id @default(cuid())
+  regulatoryVersionId String
+  sectorCode          String?
+  /// { emeMaxTurnover, qseMaxTurnover, ownershipAutoLevels: [...] }
+  thresholds          Json
+  configurationStatus String   @default("REGULATORY_CONFIGURATION_REQUIRED")
+  createdAt           DateTime @default(now())
+
+  regulatoryVersion RegulatoryVersion @relation(fields: [regulatoryVersionId], references: [id])
+
+  @@unique([regulatoryVersionId, sectorCode])
+}
+
+// -----------------------------------------------------------------------------
+// Element domain data (structured inputs prepared by agents, confirmed by humans)
+// -----------------------------------------------------------------------------
+
+model OwnershipStructure {
+  id           String   @id @default(cuid())
+  engagementId String
+  asAtDate     DateTime @db.Date
+  /// Multi-tier tracing graph: nodes and edges with economic/voting percentages.
+  tracingGraph Json?
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  engagement   VerificationEngagement @relation(fields: [engagementId], references: [id])
+  shareholders Shareholder[]
+}
+
+model Shareholder {
+  id                  String   @id @default(cuid())
+  ownershipStructureId String
+  name                String
+  /// NATURAL_PERSON | COMPANY | TRUST | BROAD_BASED_SCHEME | ESOP | OTHER
+  holderType          String
+  votingRights        Decimal? @db.Decimal(9, 6)
+  economicInterest    Decimal? @db.Decimal(9, 6)
+  /// Demographics are only ever recorded from evidence — never inferred from names.
+  blackStatusEvidenced Boolean?
+  blackWomanEvidenced  Boolean?
+  parentShareholderId String?
+  createdAt           DateTime @default(now())
+
+  ownershipStructure OwnershipStructure @relation(fields: [ownershipStructureId], references: [id], onDelete: Cascade)
+  parent             Shareholder?       @relation("ShareholderTier", fields: [parentShareholderId], references: [id])
+  children           Shareholder[]      @relation("ShareholderTier")
+}
+
+model Employee {
+  id             String   @id @default(cuid())
+  engagementId   String
+  /// Pseudonymous reference; identity numbers are stored masked only.
+  employeeRef    String
+  maskedIdNumber String?
+  occupationalLevel String?
+  isBoardMember  Boolean  @default(false)
+  isExecutive    Boolean  @default(false)
+  race           String?
+  gender         String?
+  disability     Boolean?
+  /// Demographic fields must reference evidence (EEA forms, declarations).
+  demographicsEvidenced Boolean @default(false)
+  createdAt      DateTime @default(now())
+
+  engagement      VerificationEngagement @relation(fields: [engagementId], references: [id])
+  trainingRecords TrainingRecord[]
+
+  @@unique([engagementId, employeeRef])
+}
+
+model TrainingRecord {
+  id            String   @id @default(cuid())
+  employeeId    String?
+  learnerRef    String
+  programme     String
+  category      String?
+  startDate     DateTime? @db.Date
+  endDate       DateTime? @db.Date
+  claimedAmount  Decimal? @db.Decimal(20, 2)
+  verifiedAmount Decimal? @db.Decimal(20, 2)
+  status        EvidenceStatus @default(REVIEW_REQUIRED)
+  createdAt     DateTime @default(now())
+
+  employee Employee? @relation(fields: [employeeId], references: [id])
+}
+
+model Supplier {
+  id                  String    @id @default(cuid())
+  engagementId        String
+  name                String
+  registrationNumber  String?
+  certificateType     String?
+  certificateLevel    String?
+  certificateIssuer   String?
+  certificateIssueDate  DateTime? @db.Date
+  certificateExpiryDate DateTime? @db.Date
+  blackOwnership      Decimal?  @db.Decimal(9, 6)
+  blackWomenOwnership Decimal?  @db.Decimal(9, 6)
+  category            String?
+  recognitionPercent  Decimal?  @db.Decimal(9, 6)
+  status              EvidenceStatus @default(REVIEW_REQUIRED)
+  createdAt           DateTime  @default(now())
+
+  engagement   VerificationEngagement   @relation(fields: [engagementId], references: [id])
+  transactions ProcurementTransaction[]
+
+  @@index([engagementId])
+}
+
+model ProcurementTransaction {
+  id             String   @id @default(cuid())
+  supplierId     String
+  reference      String?
+  transactionDate DateTime? @db.Date
+  amount         Decimal  @db.Decimal(20, 2)
+  isExcluded     Boolean  @default(false)
+  exclusionReason String?
+  createdAt      DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+}
+
+model DevelopmentBeneficiary {
+  id               String   @id @default(cuid())
+  engagementId     String
+  name             String
+  /// SUPPLIER_DEVELOPMENT | ENTERPRISE_DEVELOPMENT
+  programme        ScorecardElementCode
+  blackOwnership   Decimal? @db.Decimal(9, 6)
+  turnover         Decimal? @db.Decimal(20, 2)
+  isSupplier       Boolean?
+  eligibility      EvidenceStatus @default(REVIEW_REQUIRED)
+  createdAt        DateTime @default(now())
+
+  engagement    VerificationEngagement     @relation(fields: [engagementId], references: [id])
+  contributions DevelopmentContribution[]
+}
+
+model DevelopmentContribution {
+  id                String   @id @default(cuid())
+  beneficiaryId     String
+  contributionType  String
+  contributionDate  DateTime? @db.Date
+  claimedAmount     Decimal  @db.Decimal(20, 2)
+  recognitionFraction Decimal? @db.Decimal(9, 6)
+  verifiedAmount    Decimal? @db.Decimal(20, 2)
+  status            EvidenceStatus @default(REVIEW_REQUIRED)
+  createdAt         DateTime @default(now())
+
+  beneficiary DevelopmentBeneficiary @relation(fields: [beneficiaryId], references: [id], onDelete: Cascade)
+}
+
+model SEDContribution {
+  id                    String   @id @default(cuid())
+  engagementId          String
+  beneficiaryName       String
+  purpose               String?
+  contributionDate      DateTime? @db.Date
+  claimedAmount         Decimal  @db.Decimal(20, 2)
+  /// Fraction of ultimate beneficiaries that qualify, as evidenced.
+  qualifyingBeneficiaryFraction Decimal? @db.Decimal(9, 6)
+  verifiedAmount        Decimal? @db.Decimal(20, 2)
+  status                EvidenceStatus @default(REVIEW_REQUIRED)
+  createdAt             DateTime @default(now())
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id])
+}
+
+// -----------------------------------------------------------------------------
+// Agents, findings, queries
+// -----------------------------------------------------------------------------
+
+enum AgentType {
+  DOCUMENT_EVIDENCE_AGENT
+  CODE_APPLICABILITY_AGENT
+  OWNERSHIP_AGENT
+  MANAGEMENT_CONTROL_AGENT
+  SKILLS_AGENT
+  PROCUREMENT_AGENT
+  ESD_AGENT
+  SED_AGENT
+  VERIFICATION_MANAGER_AGENT
+  TECHNICAL_REVIEW_AGENT
+  VERIFICATION_ASSISTANT
+}
+
+enum AgentRunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  REJECTED_OUTPUT
+  CACHED
+}
+
+model AgentRun {
+  id            String         @id @default(cuid())
+  engagementId  String
+  agentType     AgentType
+  status        AgentRunStatus @default(PENDING)
+  model         String?
+  promptVersion String
+  /// SHA-256 of canonical input — AI response cache key.
+  inputHash     String
+  /// Validated structured output only (never free prose for calculations).
+  output        Json?
+  validationErrors Json?
+  inputTokens   Int?
+  outputTokens  Int?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime       @default(now())
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id])
+  evidence   EvidenceItem[]
+  findings   VerificationFinding[]
+
+  @@index([engagementId, agentType])
+  @@index([agentType, inputHash])
+}
+
+model VerificationFinding {
+  id             String                @id @default(cuid())
+  engagementId   String
+  agentRunId     String?
+  findingType    String
+  element        ScorecardElementCode?
+  indicatorCode  String?
+  title          String
+  description    String
+  claimedValue   Decimal?              @db.Decimal(20, 2)
+  verifiedValue  Decimal?              @db.Decimal(20, 2)
+  confidence     Confidence            @default(UNVERIFIED)
+  /// IDs of RegulatoryProvision rows relied upon (FK-checked on write).
+  regulatoryProvisionIds String[]
+  isVerificationRisk Boolean           @default(false)
+  requiresHumanReview Boolean          @default(true)
+  /// AI result is preserved; Override rows carry human changes.
+  status         String                @default("OPEN")
+  isInternal     Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id])
+  agentRun   AgentRun?              @relation(fields: [agentRunId], references: [id])
+
+  @@index([engagementId, element])
+}
+
+enum QueryPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum QueryStatus {
+  OPEN
+  CLIENT_RESPONDED
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+model VerificationQuery {
+  id               String                @id @default(cuid())
+  engagementId     String
+  queryNumber      Int
+  element          ScorecardElementCode?
+  indicatorCode    String?
+  description      String
+  reason           String
+  evidenceReviewed String?
+  evidenceRequested String
+  scoreImpact      String?
+  priority         QueryPriority         @default(MEDIUM)
+  status           QueryStatus           @default(OPEN)
+  assignedToId     String?
+  /// Internal reviewer note, never shown to CLIENT_USER unless shared.
+  internalNote     String?
+  shareInternalNote Boolean              @default(false)
+  responseDate     DateTime?
+  reviewResult     String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id])
+  assignedTo User?                  @relation("QueryAssignee", fields: [assignedToId], references: [id])
+  responses  QueryResponse[]
+
+  @@unique([engagementId, queryNumber])
+}
+
+model QueryResponse {
+  id        String   @id @default(cuid())
+  queryId   String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  query     VerificationQuery       @relation(fields: [queryId], references: [id], onDelete: Cascade)
+  author    User                    @relation(fields: [authorId], references: [id])
+  documents QueryResponseDocument[]
+}
+
+model QueryResponseDocument {
+  queryResponseId String
+  documentId      String
+
+  queryResponse QueryResponse @relation(fields: [queryResponseId], references: [id], onDelete: Cascade)
+  document      Document      @relation(fields: [documentId], references: [id])
+
+  @@id([queryResponseId, documentId])
+}
+
+// -----------------------------------------------------------------------------
+// Calculation (Layer 3) — deterministic, traceable
+// -----------------------------------------------------------------------------
+
+/// A verified structured input to a calculation. Client claim, verified value,
+/// unverified value and potential value are stored separately and never overwritten.
+model CalculationInput {
+  id              String   @id @default(cuid())
+  engagementId    String
+  indicatorCode   String
+  inputKey        String
+  unit            String
+  clientClaim     Decimal? @db.Decimal(20, 4)
+  verifiedValue   Decimal? @db.Decimal(20, 4)
+  unverifiedValue Decimal? @db.Decimal(20, 4)
+  potentialValue  Decimal? @db.Decimal(20, 4)
+  confidence      Confidence @default(UNVERIFIED)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id])
+
+  @@unique([engagementId, indicatorCode, inputKey])
+}
+
+enum CalculationStatus {
+  CALCULATED
+  REGULATORY_CONFIGURATION_REQUIRED
+  INSUFFICIENT_INPUTS
+  ERROR
+}
+
+model CalculationResult {
+  id                String            @id @default(cuid())
+  engagementId      String
+  scorecardId       String?
+  calculationRuleId String
+  indicatorCode     String
+  status            CalculationStatus
+  /// Full deterministic trace (formula, inputs, target, actual, recognised,
+  /// weighting, raw, capped, bonus, rounding, result). See engine/types.ts.
+  trace             Json
+  points            Decimal?          @db.Decimal(10, 4)
+  bonusPoints       Decimal?          @db.Decimal(10, 4)
+  confidence        Confidence        @default(UNVERIFIED)
+  engineVersion     String
+  createdAt         DateTime          @default(now())
+
+  engagement      VerificationEngagement @relation(fields: [engagementId], references: [id])
+  scorecard       Scorecard?             @relation(fields: [scorecardId], references: [id])
+  calculationRule CalculationRule        @relation(fields: [calculationRuleId], references: [id])
+
+  @@index([engagementId, indicatorCode])
+}
+
+model Scorecard {
+  id           String   @id @default(cuid())
+  engagementId String
+  templateId   String
+  /// INITIAL_ASSESSMENT | REASSESSMENT | SCENARIO (scenarios never replace verified)
+  kind         String   @default("PROVISIONAL")
+  isScenario   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id])
+  template   ScorecardTemplate      @relation(fields: [templateId], references: [id])
+  results    CalculationResult[]
+  summary    ScorecardResult?
+}
+
+model ScorecardResult {
+  id                    String   @id @default(cuid())
+  scorecardId           String   @unique
+  totalPoints           Decimal? @db.Decimal(10, 4)
+  levelBeforeDiscount   String?
+  levelAfterDiscount    String?
+  recognitionPercent    Decimal? @db.Decimal(9, 6)
+  priorityResults       Json
+  /// "PROVISIONAL VERIFIED SCORE — VERIFICATION MANAGER REVIEW REQUIRED"
+  resultLabel           String
+  lowConfidenceAreas    Json?
+  createdAt             DateTime @default(now())
+
+  scorecard Scorecard @relation(fields: [scorecardId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// Human review (Layer 4)
+// -----------------------------------------------------------------------------
+
+model Override {
+  id            String   @id @default(cuid())
+  engagementId  String
+  /// e.g. DOCUMENT_CLASSIFICATION | EVIDENCE_STATUS | RECOGNISED_AMOUNT |
+  /// REGULATORY_INTERPRETATION | AGENT_FINDING
+  overrideType  String
+  targetType    String
+  targetId      String
+  field         String
+  aiValue       Json?
+  overrideValue Json
+  reason        String
+  comment       String?
+  userId        String
+  createdAt     DateTime @default(now())
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id])
+  user       User                   @relation(fields: [userId], references: [id])
+
+  @@index([targetType, targetId])
+}
+
+enum TechnicalReviewDecision {
+  PENDING
+  APPROVED
+  RETURNED_FOR_CORRECTION
+  INVALIDATED
+}
+
+model TechnicalReview {
+  id           String                  @id @default(cuid())
+  engagementId String
+  snapshotId   String
+  reviewerId   String
+  decision     TechnicalReviewDecision @default(PENDING)
+  aiComparison Json?
+  comments     String?
+  decidedAt    DateTime?
+  createdAt    DateTime                @default(now())
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id])
+  snapshot   VerificationSnapshot   @relation(fields: [snapshotId], references: [id])
+  reviewer   User                   @relation(fields: [reviewerId], references: [id])
+  findings   ReviewFinding[]
+}
+
+model ReviewFinding {
+  id                String   @id @default(cuid())
+  technicalReviewId String
+  element           ScorecardElementCode?
+  indicatorCode     String?
+  description       String
+  isMaterial        Boolean  @default(false)
+  status            String   @default("OPEN")
+  createdAt         DateTime @default(now())
+
+  technicalReview TechnicalReview @relation(fields: [technicalReviewId], references: [id], onDelete: Cascade)
+}
+
+enum SnapshotMilestone {
+  INITIAL_ASSESSMENT
+  CLIENT_QUERY_ROUND
+  VERIFICATION_MANAGER_REVIEW
+  TECHNICAL_REVIEW
+  FINAL_APPROVED_VERSION
+}
+
+/// Immutable (DB trigger blocks UPDATE/DELETE).
+model VerificationSnapshot {
+  id           String            @id @default(cuid())
+  engagementId String
+  milestone    SnapshotMilestone
+  payload      Json
+  payloadHash  String
+  createdById  String
+  createdAt    DateTime          @default(now())
+
+  engagement       VerificationEngagement @relation(fields: [engagementId], references: [id])
+  technicalReviews TechnicalReview[]
+
+  @@index([engagementId, createdAt])
+}
+
+model Report {
+  id           String   @id @default(cuid())
+  engagementId String
+  reportType   String
+  format       String
+  storageKey   String
+  sha256       String
+  snapshotId   String?
+  generatedById String
+  createdAt    DateTime @default(now())
+
+  engagement VerificationEngagement @relation(fields: [engagementId], references: [id])
+}
+
+/// Append-only, hash-chained audit log (DB trigger blocks UPDATE/DELETE).
+model AuditEvent {
+  id             String   @id @default(cuid())
+  sequence       BigInt   @default(autoincrement()) @unique
+  organisationId String?
+  engagementId   String?
+  userId         String?
+  eventType      String
+  entityType     String?
+  entityId       String?
+  previousValue  Json?
+  newValue       Json?
+  reason         String?
+  ipAddress      String?
+  prevHash       String?
+  hash           String
+  createdAt      DateTime @default(now())
+
+  organisation Organisation?           @relation(fields: [organisationId], references: [id])
+  engagement   VerificationEngagement? @relation(fields: [engagementId], references: [id])
+
+  @@index([engagementId, createdAt])
+  @@index([entityType, entityId])
+}

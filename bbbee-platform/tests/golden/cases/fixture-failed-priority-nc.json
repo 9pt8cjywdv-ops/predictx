@@ -1,0 +1,184 @@
+{
+  "id": "fixture-failed-priority-non-compliant",
+  "description": "Priority element E1 fails its sub-minimum; one-level discount applied. Mechanics only.",
+  "provenance": {
+    "kind": "ENGINE_FIXTURE"
+  },
+  "config": {
+    "regulatoryVersionId": "fixture-v1",
+    "entityClassification": "QSE",
+    "rules": [
+      {
+        "ruleId": "r1",
+        "regulatoryVersionId": "fixture-v1",
+        "indicatorCode": "E1.SPEND",
+        "element": "E1",
+        "formulaType": "PROPORTIONAL",
+        "parameters": {
+          "numeratorKey": "e1.spend",
+          "denominatorKey": "e1.base",
+          "target": "0.05"
+        },
+        "weighting": "25",
+        "cap": null,
+        "bonusRule": null,
+        "roundingMethod": "HALF_UP_2DP",
+        "configurationStatus": "CONFIGURED",
+        "provisionIds": [
+          "p1"
+        ]
+      },
+      {
+        "ruleId": "r2",
+        "regulatoryVersionId": "fixture-v1",
+        "indicatorCode": "E1.COUNT",
+        "element": "E1",
+        "formulaType": "BINARY_THRESHOLD",
+        "parameters": {
+          "inputKey": "e1.count",
+          "threshold": "3",
+          "comparator": "GTE"
+        },
+        "weighting": "5",
+        "cap": null,
+        "bonusRule": null,
+        "roundingMethod": "NONE",
+        "configurationStatus": "CONFIGURED",
+        "provisionIds": [
+          "p2"
+        ]
+      },
+      {
+        "ruleId": "r3",
+        "regulatoryVersionId": "fixture-v1",
+        "indicatorCode": "E2.SHARE",
+        "element": "E2",
+        "formulaType": "PROPORTIONAL",
+        "parameters": {
+          "numeratorKey": "e2.share",
+          "target": "0.3"
+        },
+        "weighting": "20",
+        "cap": null,
+        "bonusRule": {
+          "type": "THRESHOLD_FLAT",
+          "inputKey": "e2.share",
+          "threshold": "0.5",
+          "comparator": "GTE",
+          "points": "2"
+        },
+        "roundingMethod": "HALF_UP_2DP",
+        "configurationStatus": "CONFIGURED",
+        "provisionIds": [
+          "p3"
+        ]
+      }
+    ],
+    "priorityRules": [
+      {
+        "element": "E1",
+        "configurationStatus": "CONFIGURED",
+        "applicableTo": [
+          "QSE",
+          "GENERIC"
+        ],
+        "groups": [
+          {
+            "label": "E1",
+            "indicatorCodes": [
+              "E1.SPEND",
+              "E1.COUNT"
+            ],
+            "availablePoints": "30",
+            "fraction": "0.4"
+          }
+        ],
+        "includeBonus": false
+      }
+    ],
+    "recognitionTable": {
+      "regulatoryVersionId": "fixture-v1",
+      "configurationStatus": "CONFIGURED",
+      "bands": [
+        {
+          "level": "L1",
+          "minPoints": "45",
+          "recognitionPercent": "1.2"
+        },
+        {
+          "level": "L2",
+          "minPoints": "35",
+          "recognitionPercent": "1"
+        },
+        {
+          "level": "L3",
+          "minPoints": "25",
+          "recognitionPercent": "0.8"
+        }
+      ],
+      "nonCompliantLabel": "Non-Compliant",
+      "nonCompliantRecognition": "0"
+    },
+    "discountPolicy": {
+      "configurationStatus": "CONFIGURED",
+      "mode": "ONE_LEVEL_IF_ANY_FAIL",
+      "levelsPerDiscount": 1
+    }
+  },
+  "inputs": [
+    {
+      "key": "e1.spend",
+      "unit": "ZAR",
+      "verifiedValue": "5000",
+      "clientClaim": "60000",
+      "confidence": "HIGH",
+      "evidenceIds": [
+        "ev1"
+      ]
+    },
+    {
+      "key": "e1.base",
+      "unit": "ZAR",
+      "verifiedValue": "1000000",
+      "confidence": "HIGH",
+      "evidenceIds": [
+        "ev2"
+      ]
+    },
+    {
+      "key": "e1.count",
+      "unit": "COUNT",
+      "verifiedValue": "2",
+      "confidence": "MEDIUM",
+      "evidenceIds": [
+        "ev3"
+      ]
+    },
+    {
+      "key": "e2.share",
+      "unit": "RATIO",
+      "verifiedValue": "0.3",
+      "confidence": "HIGH",
+      "evidenceIds": [
+        "ev4"
+      ]
+    }
+  ],
+  "expected": {
+    "complete": true,
+    "totalPoints": "22.5",
+    "indicators": {
+      "E1.SPEND": "2.5",
+      "E1.COUNT": "0",
+      "E2.SHARE": "20"
+    },
+    "bonus": {
+      "E2.SHARE": "0"
+    },
+    "priority": {
+      "E1": "FAIL"
+    },
+    "levelBeforeDiscount": "Non-Compliant",
+    "levelAfterDiscount": "Non-Compliant"
+  }
+}

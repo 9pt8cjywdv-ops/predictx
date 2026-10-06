@@ -1,0 +1,42 @@
+name: bbbee-platform
+
+on:
+  push:
+    paths: ["bbbee-platform/**", ".github/workflows/bbbee-platform.yml"]
+  pull_request:
+    paths: ["bbbee-platform/**", ".github/workflows/bbbee-platform.yml"]
+
+defaults:
+  run:
+    working-directory: bbbee-platform
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bbbee
+          POSTGRES_PASSWORD: bbbee
+          POSTGRES_DB: bbbee_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bbbee" --health-interval 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://bbbee:bbbee@localhost:5432/bbbee_test
+      DATABASE_URL: postgresql://bbbee:bbbee@localhost:5432/bbbee_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bbbee-platform/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run typecheck
+      - run: npm run lint
+      # Golden cases run inside the unit project: a scoring regression fails the build.
+      - run: npm test
+      - run: npm run build

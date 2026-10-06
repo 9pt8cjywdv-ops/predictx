@@ -1,0 +1,21 @@
+/** Spec §38 workspace tabs, with the build phase that delivers each. */
+export const ENGAGEMENT_TABS = [
+  { slug: "", label: "Overview", phase: 1, clientVisible: true },
+  { slug: "documents", label: "Documents", phase: 1, clientVisible: true },
+  { slug: "entity", label: "Entity", phase: 2, clientVisible: false },
+  { slug: "code-applicability", label: "Code applicability", phase: 1, clientVisible: false },
+  { slug: "ownership", label: "Ownership", phase: 4, clientVisible: false },
+  { slug: "management-control", label: "Management control", phase: 4, clientVisible: false },
+  { slug: "skills-development", label: "Skills development", phase: 4, clientVisible: false },
+  { slug: "procurement", label: "Procurement", phase: 4, clientVisible: false },
+  { slug: "supplier-development", label: "Supplier development", phase: 4, clientVisible: false },
+  { slug: "enterprise-development", label: "Enterprise development", phase: 4, clientVisible: false },
+  { slug: "sed", label: "Socio-economic development", phase: 4, clientVisible: false },
+  { slug: "sector-elements", label: "Sector elements", phase: 8, clientVisible: false },
+  { slug: "queries", label: "Queries", phase: 5, clientVisible: true },
+  { slug: "risks", label: "Risks", phase: 4, clientVisible: false },
+  { slug: "scorecard", label: "Scorecard", phase: 3, clientVisible: false },
+  { slug: "technical-review", label: "Technical review", phase: 6, clientVisible: false },
+  { slug: "reports", label: "Reports", phase: 7, clientVisible: false },
+  { slug: "audit", label: "Audit log", phase: 1, clientVisible: false },
+] as const;

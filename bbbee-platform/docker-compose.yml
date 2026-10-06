@@ -1,0 +1,68 @@
+# Local production-like stack. Secrets here are development placeholders only.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: bbbee
+      POSTGRES_PASSWORD: bbbee
+      POSTGRES_DB: bbbee
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bbbee"]
+      interval: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: bbbee-dev
+      MINIO_ROOT_PASSWORD: bbbee-dev-secret
+    volumes: [objects:/data]
+    ports: ["9001:9001"]
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      sh -c "until mc alias set local http://minio:9000 bbbee-dev bbbee-dev-secret; do sleep 1; done;
+             mc mb --ignore-existing local/bbbee-evidence && mc version enable local/bbbee-evidence"
+
+  clamav:
+    image: clamav/clamav:stable
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+    environment: &appenv
+      DATABASE_URL: postgresql://bbbee:bbbee@db:5432/bbbee?schema=public
+      STORAGE_DRIVER: s3
+      S3_BUCKET: bbbee-evidence
+      S3_REGION: af-south-1
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY_ID: bbbee-dev
+      S3_SECRET_ACCESS_KEY: bbbee-dev-secret
+      S3_SSE: AES256
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+      COOKIE_SECURE: "false"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      db: { condition: service_healthy }
+
+  app:
+    build: .
+    environment: *appenv
+    ports: ["3100:3100"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+      clamav: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  objects:
