@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GENESIS Control</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div id="login" class="login hidden">
+  <form id="login-form" class="card login-card">
+    <h1>GENESIS AI</h1>
+    <p class="muted">Administrator or viewer token</p>
+    <input id="token" type="password" autocomplete="current-password" placeholder="Bearer token" required>
+    <button type="submit" class="btn primary">Sign in</button>
+    <p id="login-error" class="error"></p>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand"><span class="logo">◈</span> GENESIS AI <span id="mode-badge" class="badge"></span></div>
+    <nav id="tabs" class="tabs" aria-label="Sections">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="agents">Agents</button>
+      <button data-tab="tree">Family tree</button>
+      <button data-tab="finance">Finance</button>
+      <button data-tab="activity">Activity</button>
+      <button data-tab="approvals">Approvals <span id="approval-count" class="count"></span></button>
+      <button data-tab="controls">Controls</button>
+      <button data-tab="audit">Audit</button>
+    </nav>
+    <div class="top-right">
+      <span id="clock" class="muted small"></span>
+      <button id="theme" class="btn ghost small" title="Toggle theme">◐</button>
+      <button id="logout" class="btn ghost small">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="banner" class="banner hidden"></div>
+
+    <!-- OVERVIEW -->
+    <section id="tab-overview" class="tab">
+      <div id="empty-state" class="card hidden">
+        <h2>Create the genesis agent</h2>
+        <p class="muted">Funds the master treasury with the initial capital (virtual USDC in simulation mode) and allocates $50 to Agent 001.</p>
+        <div class="form-row">
+          <label>Strategy <select id="g-strategy"></select></label>
+          <label>Market <select id="g-market"><option value="">random (unbiased)</option></select></label>
+          <label>Fund (USD) <input id="g-fund" type="number" value="50" min="50" step="1"></label>
+          <button id="g-create" class="btn primary admin-only">Create Agent 001</button>
+        </div>
+      </div>
+      <div id="kpis" class="kpis"></div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h3>Net assets and cumulative realized profit</h3><span class="muted small">USD, daily</span></div>
+          <div id="chart-assets" class="chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Weekly distributions</h3><span id="next-dist" class="muted small"></span></div>
+          <div id="dist-table"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Top agents</h3><button class="btn ghost small" data-goto="agents">All agents →</button></div>
+        <div id="top-agents"></div>
+      </div>
+    </section>
+
+    <!-- AGENTS -->
+    <section id="tab-agents" class="tab hidden">
+      <div class="card">
+        <div class="card-head"><h3>Agent leaderboard</h3>
+          <label class="small muted"><input type="checkbox" id="show-dead" checked> show terminated</label></div>
+        <div id="leaderboard" class="table-wrap"></div>
+      </div>
+      <div id="agent-detail" class="card hidden"></div>
+    </section>
+
+    <!-- TREE -->
+    <section id="tab-tree" class="tab hidden">
+      <div class="card">
+        <div class="card-head"><h3>Family tree</h3><div id="tree-legend" class="legend"></div></div>
+        <div id="tree" class="tree-wrap"></div>
+      </div>
+    </section>
+
+    <!-- FINANCE -->
+    <section id="tab-finance" class="tab hidden">
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h3>Daily revenue and expenses</h3><span class="muted small">last 30 days</span></div>
+          <div id="chart-daily" class="chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Expenses by category</h3>
+            <select id="cost-window" class="small"><option value="1">24h</option><option value="7" selected>7 days</option><option value="30">30 days</option><option value="3650">all time</option></select></div>
+          <div id="chart-costs" class="chart"></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-head"><h3>Capital allocation by agent</h3><span class="muted small">net capital, living agents</span></div>
+          <div id="chart-alloc" class="chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>External transfers</h3></div>
+          <div id="transfers" class="table-wrap"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Transaction history</h3>
+          <select id="tx-kind" class="small"><option value="">all kinds</option></select></div>
+        <div id="txs" class="table-wrap"></div>
+      </div>
+    </section>
+
+    <!-- ACTIVITY -->
+    <section id="tab-activity" class="tab hidden">
+      <div class="card">
+        <div class="card-head"><h3>Ecosystem activity</h3>
+          <select id="ev-sev" class="small"><option value="">all</option><option value="warning">warnings</option><option value="critical">critical</option></select></div>
+        <div id="events" class="feed"></div>
+      </div>
+    </section>
+
+    <!-- APPROVALS -->
+    <section id="tab-approvals" class="tab hidden">
+      <div class="card">
+        <div class="card-head"><h3>Pending approvals</h3></div>
+        <div id="approvals"></div>
+      </div>
+    </section>
+
+    <!-- CONTROLS -->
+    <section id="tab-controls" class="tab hidden">
+      <div class="grid2">
+        <div class="card">
+          <h3>Ecosystem</h3>
+          <div class="btn-row admin-only">
+            <button class="btn" data-control="pause">Pause</button>
+            <button class="btn" data-control="resume">Resume</button>
+            <button class="btn danger" data-control="emergency-stop">Emergency stop</button>
+          </div>
+          <div class="btn-row admin-only">
+            <button class="btn" data-control="start-orchestrator">Start scheduler</button>
+            <button class="btn" data-control="stop-orchestrator">Stop scheduler</button>
+          </div>
+          <div id="sim-controls" class="admin-only">
+            <h4>Simulation clock</h4>
+            <div class="btn-row">
+              <button class="btn" data-advance="24">+1 day</button>
+              <button class="btn" data-advance="168">+1 week</button>
+              <button class="btn" data-advance="720">+30 days</button>
+            </div>
+          </div>
+          <h4>Treasury</h4>
+          <div class="btn-row admin-only">
+            <button class="btn" id="reconcile">Reconcile</button>
+            <button class="btn" id="run-dist">Run distribution now</button>
+          </div>
+          <pre id="reconcile-out" class="small muted"></pre>
+        </div>
+        <div class="card">
+          <h3>Administrator wallet</h3>
+          <p class="muted small">Destination for weekly profit distributions. Never paste private keys or seed phrases anywhere.</p>
+          <div class="form-row admin-only">
+            <label>Network <select id="w-network"></select></label>
+            <label class="grow">Address <input id="w-address" placeholder="0x…"></label>
+            <button class="btn primary" id="w-save">Save</button>
+          </div>
+          <p id="w-current" class="small"></p>
+          <h3>Live mode</h3>
+          <div id="readiness"></div>
+          <div class="form-row admin-only">
+            <label class="grow">Confirmation phrase <input id="live-phrase" placeholder="I AUTHORIZE LIVE TRANSACTIONS"></label>
+            <button class="btn danger" id="live-activate">Activate live mode</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Policy and limits</h3>
+          <div class="btn-row admin-only"><button class="btn" id="confirm-limits">Confirm limits</button><button class="btn primary" id="save-policy">Save changes</button></div></div>
+        <div id="policy-form" class="policy-grid"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Integrations</h3></div>
+        <p class="muted small">Credentials are encrypted at rest and write-only. Agents never receive them.</p>
+        <div class="form-row admin-only">
+          <label>Name <input id="i-name" placeholder="stripe"></label>
+          <label class="grow">Secret <input id="i-value" type="password" autocomplete="off"></label>
+          <label>Scopes <input id="i-scopes" placeholder="integration:stripe"></label>
+          <button class="btn" id="i-save">Store</button>
+        </div>
+        <div id="integrations"></div>
+      </div>
+    </section>
+
+    <!-- AUDIT -->
+    <section id="tab-audit" class="tab hidden">
+      <div class="card">
+        <div class="card-head"><h3>Audit log</h3><span id="audit-verify" class="small"></span></div>
+        <div id="audit" class="table-wrap"></div>
+      </div>
+    </section>
+  </main>
+  <div id="tooltip" class="tooltip hidden" role="tooltip"></div>
+  <div id="toast" class="toast hidden"></div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
