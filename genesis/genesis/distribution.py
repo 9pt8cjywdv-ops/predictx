@@ -140,12 +140,13 @@ def run_distribution(core, s: Session, period_end: datetime, *, actor: str = "sc
     s.flush()
     set_state(s, "last_distribution_period_end", period_end.isoformat(), now)
 
+    # Operator-paid costs are a liability, repaid every period regardless of profit or pending payouts.
+    d.reimbursement_amount = reimburse_operator(core, s, actor=actor)
     if s.scalar(select(Distribution.id).where(Distribution.status == "pending_approval", Distribution.id != d.id)):
         d.status = "deferred_pending_approval"
         details["note"] = "an earlier payout awaits approval; this period's profit carries forward"
         d.details = details
         return d
-    d.reimbursement_amount = reimburse_operator(core, s, actor=actor)
     if owner <= 0:
         d.status = "no_profit" if distributable == 0 else "no_owner_share"
         details["note"] = ("no distributable profit (period loss or prior losses not yet recovered)"

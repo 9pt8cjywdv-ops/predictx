@@ -18,9 +18,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from . import audit, live, reporting
-from .distribution import execute_distribution, run_distribution
+from .distribution import run_distribution
 from .errors import Conflict, GenesisError, NotFound, PolicyViolation
-from .models import Agent, AgentEvent, AgentStatus, Approval, AuditLog, Transfer
+from .models import AgentEvent, AgentStatus, Approval, AuditLog, Transfer
 from .money import to_usd, usd
 from .policy import all_state, get_policy, set_state, update_policy
 from .runtime import Runtime, build_runtime
@@ -318,7 +318,7 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
             elif action == "emergency-stop":
                 set_state(s, "emergency_stop", True, core.now())
                 set_state(s, "paused", True, core.now())
-                if get_policy(s) and all_state(s)["live_mode"]:
+                if all_state(s)["live_mode"]:
                     live.deactivate(s, actor="admin", ts=core.now())
             audit.record(s, ts=core.now(), actor="admin", action=f"control_{action}", details={"reason": body.reason})
         run(request, fn)
@@ -458,9 +458,6 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
             return FileResponse(STATIC / "index.html")
 
     return app
-
-
-app = None
 
 
 def get_app() -> FastAPI:  # uvicorn --factory genesis.api:get_app

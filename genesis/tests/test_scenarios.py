@@ -155,9 +155,14 @@ def test_e2_large_payout_requires_approval(core, h):
     with core.tx() as s:
         assert SimulatedChain(s).balance(WALLET) == 0
         ap = s.scalar(select(Approval).where(Approval.kind == "distribution_payout"))
+    # while the payout awaits approval, later periods defer profit but still repay operator costs
+    h.expense(aid, 1, "business")
+    core.clock.advance(timedelta(days=7))
+    d_next = core.run(lambda s: run_distribution(core, s, core.now()))
+    assert d_next.status == "deferred_pending_approval" and d_next.reimbursement_amount == usd(1)
     core.run(lambda s: core.decide_approval(s, ap.id, True, actor="admin"))
     with core.tx() as s:
-        assert SimulatedChain(s).balance(WALLET) == usd(200)
+        assert SimulatedChain(s).balance(WALLET) == usd(201)
         assert s.get(Distribution, d.id).status == "executed"
 
 

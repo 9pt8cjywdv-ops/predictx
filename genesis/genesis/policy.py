@@ -7,7 +7,6 @@ a reference to it: agents receive a read-only snapshot.
 import copy
 from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .errors import PolicyViolation

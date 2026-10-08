@@ -23,9 +23,9 @@ from sqlalchemy import func, select
 
 from .brain import HeuristicBrain
 from .config import load_settings
-from .ledger import A, Ledger
+from .ledger import Ledger
 from .models import Agent, Distribution
-from .money import to_usd, usd
+from .money import usd
 from .policy import set_state
 from .reporting import overview
 from .runtime import build_runtime
@@ -113,20 +113,22 @@ def write_report(results: list[dict], path: Path, days: int, verification: str |
         "with a cold start, realistic fees and model-usage costs. They demonstrate that the ecosystem's mechanics work;",
         "they are **not** a forecast of real-world revenue.",
         "",
-        f"Each run: one genesis agent with $50, the deterministic heuristic brain (Claude usage metered at Haiku 5.5",
-        f"rates), {days} simulated days, administrator wallet configured, default conservative policy.",
+        "Each run: one genesis agent with $50, the deterministic heuristic brain (Claude usage metered at Haiku 5.5",
+        "rates), administrator wallet configured, default conservative policy (incl. $100 auto-payout limit and",
+        "$5,000 max aggregate capital). Larger payouts wait for administrator approval, which nobody gives in these",
+        "unattended runs - so 'paid to owner' understates what an attentive administrator would receive.",
         "",
     ]
     if verification:
         lines += ["## Automated scenario verification", "", "```", verification.strip(), "```", ""]
     lines += [
         "## Per-run outcomes", "",
-        "| Seed | Genesis strategy / market | Agents | Alive | Dead | Max gen | Revenue | Expenses | Realized profit | Paid to owner | Net assets | Owner return on $50 | Books |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Seed | Days | Genesis strategy / market | Agents | Alive | Dead | Max gen | Revenue | Expenses | Realized profit | Paid to owner | Net assets | Owner return on $50 | Books |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         lines.append(
-            f"| {r['seed']} | {r['genesis_strategy']} / {r['genesis_market']} | {r['agents_created']} | {r['alive']} | {r['deceased']} | "
+            f"| {r['seed']} | {r['days']} | {r['genesis_strategy']} / {r['genesis_market']} | {r['agents_created']} | {r['alive']} | {r['deceased']} | "
             f"{r['max_generation']} | ${r['revenue']:,.2f} | ${r['expenses']:,.2f} | ${r['realized_profit']:,.2f} | "
             f"${r['distributed_to_owner']:,.2f} | ${r['net_assets']:,.2f} | {r['owner_total_return'] * 100:,.0f}% | "
             f"{'reconciled' if r['reconciled'] and r['balanced'] else 'MISMATCH'} |")

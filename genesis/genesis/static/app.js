@@ -403,6 +403,7 @@
     const ban = $("#banner");
     if (o.emergency_stop) { ban.className = "banner crit"; ban.textContent = "■ Emergency stop engaged — all agent activity and payouts are halted."; }
     else if (o.paused) { ban.className = "banner warn"; ban.textContent = "▲ Ecosystem paused — agents are not running."; }
+    else if (o.pending_approvals) { ban.className = "banner warn"; ban.innerHTML = `▲ ${o.pending_approvals} item(s) await your decision — payouts above the auto-payout limit are held until approved. <button class="btn small" data-goto="approvals">Review</button>`; }
     else if (!o.admin_wallet && o.total_agents) { ban.className = "banner warn"; ban.textContent = "▲ No administrator wallet configured; weekly distributions will be held. Set one under Controls."; }
     else ban.className = "banner hidden";
   }

@@ -18,7 +18,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from . import audit
 from .brain import HeuristicBrain, PlanContext
-from .clock import SimClock, SystemClock
+from .clock import SimClock
 from .errors import Conflict, GenesisError, InsufficientFunds, LedgerError, NotFound, PolicyViolation
 from .ledger import (
     ACCRUAL, ALLOCATION, COLLECTION, CONTRIBUTION, ESTATE_SWEEP, EXPENSE, EXPENSE_CATEGORIES, INTERNAL_TRANSFER,

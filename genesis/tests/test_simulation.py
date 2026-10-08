@@ -4,7 +4,6 @@ from sqlalchemy import select
 
 from genesis.ledger import A, Ledger
 from genesis.models import Agent, Distribution
-from genesis.policy import set_state
 from genesis.treasury import reconcile
 
 from .conftest import WALLET

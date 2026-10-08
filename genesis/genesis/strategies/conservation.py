@@ -1,4 +1,4 @@
-from .base import Param, Strategy, StrategySpec
+from .base import Strategy, StrategySpec
 
 
 class Conservation(Strategy):
