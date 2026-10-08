@@ -9,7 +9,7 @@
 | Agents reasoning with Claude | **Yes — implemented** | One strict tool (`submit_plan`); output is validated and clamped. Deterministic fallback brain. |
 | Agents *autonomously earning real money* | **Partially, and only after human setup** | Every real revenue rail (Stripe, exchange accounts, domains, hosting) requires a legal identity, KYC and contract acceptance. Those must belong to the administrator. GENESIS provides the integration points and gating; it cannot lawfully open accounts by itself. |
 | Real USDC custody and transfers | **Architected, awaiting credentials** | Signing is delegated to an external, policy-enforcing signer (Safe module / Coinbase CDP / Fireblocks / HSM). Keys never enter this process. |
-| Profitability from $50 | **Not guaranteed — likely not** | At current prices a routine Claude Haiku 5.5 planning call costs ≈ $0.0005, so model cost is not the constraint; *demand* is. Most simulated niches fail. The system is designed to fail cheaply and keep the books exact. |
+| Profitability from $50 | **Not guaranteed — likely not** | At current prices a routine Claude Haiku 5.5 planning call costs ≈ $0.0005, so model cost is not the constraint; *demand* is. Most simulated niches fail, though cheap switching let every simulated ecosystem find one that sells; real markets are harsher. The system is designed to fail cheaply and keep the books exact. |
 | Agent-written code deployed publicly | **Gated** | Strategy code is reviewed, version-controlled plug-ins. Agents choose and parameterise strategies; they do not self-modify production code. Public deployments require an administrator approval (security & compliance review). |
 
 ## 2. Contradictions and unresolved rules — and how they were resolved

@@ -145,9 +145,9 @@ def write_report(results: list[dict], path: Path, days: int, verification: str |
         f"- Every run's ledger balanced and reconciled against the simulated chain: "
         f"{'yes' if all(r['reconciled'] and r['balanced'] for r in results) else 'NO - investigate'}.",
         "",
-        "Interpretation: outcomes are dominated by whether the genesis agent lands in (or discovers) a viable niche.",
-        "Unleveraged spot trading in a zero-drift market loses money to fees on average, by design. Most experiments",
-        "fail; the ecosystem's job is to fail cheaply, keep the books exact and only pay out realized profit.",
+        "Interpretation: individual experiments mostly fail, but switching niches is cheap in this model, so",
+        "unattended ecosystems tend to find a selling niche eventually. That reflects the model's assumptions, not",
+        "real-world profitability. Unleveraged spot trading in a zero-drift market loses money to fees by design.",
         "",
         "Raw data:", "", "```json", json.dumps(results, indent=1), "```", "",
     ]

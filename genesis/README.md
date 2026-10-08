@@ -4,7 +4,7 @@ An autonomous, self-replicating AI economic ecosystem: AI agents start with $50 
 
 **Current mode: SIMULATION.** All balances are virtual USDC until the administrator completes the live-mode checklist and explicitly authorises real transactions.
 
-> Revenue is never guaranteed. In simulation most experiments fail; the system is built to fail cheaply, keep exact books, and only ever distribute realised, verified profit.
+> Revenue is never guaranteed. In simulation most individual experiments fail, and the simulated demand model is more forgiving than real markets (see [simulation results](docs/SIMULATION_RESULTS.md)). The system is built to fail cheaply, keep exact books, and only ever distribute realised, verified profit.
 
 ## What is implemented
 
