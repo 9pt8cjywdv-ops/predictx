@@ -1,5 +1,9 @@
 /**
- * Development seed.
+ * Seed.
+ *
+ *   SEED_MODE=demo (default)  demo agency, six demo users, demo client/engagement.
+ *   SEED_MODE=production      one organisation (ORG_NAME) and one administrator
+ *                             (ADMIN_EMAIL / ADMIN_NAME / ADMIN_PASSWORD). No demo data.
  *
  * Seeds the regulatory *structure* only. No regulatory figure (target,
  * weighting, threshold, recognition level, Gazette number or date) is invented:
@@ -9,12 +13,20 @@
  */
 import { PrismaClient, type Role, type ScorecardElementCode } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { validatePasswordPolicy } from "../src/lib/auth/password";
 import { DEFAULT_ROLE_PERMISSIONS } from "../src/lib/rbac/permissions";
 
 const prisma = new PrismaClient();
 const RCR = "REGULATORY_CONFIGURATION_REQUIRED";
 
+const PRODUCTION = process.env.SEED_MODE === "production";
 const SEED_PASSWORD = process.env.SEED_PASSWORD ?? "Verify-Dev-2026!";
+
+function required(name: string): string {
+  const v = process.env[name]?.trim();
+  if (!v) throw new Error(`${name} is required when SEED_MODE=production`);
+  return v;
+}
 
 const USERS: Array<{ email: string; name: string; role: Role }> = [
   { email: "admin@agency.test", name: "Platform Administrator", role: "ADMINISTRATOR" },
@@ -51,11 +63,20 @@ const SECTOR_CODES = [
 ] as const;
 
 async function main() {
-  const passwordHash = await bcrypt.hash(SEED_PASSWORD, 12);
+  const orgName = PRODUCTION ? required("ORG_NAME") : "Demo Verification Agency";
+  let users: Array<{ email: string; name: string; role: Role }> = USERS;
+  let password = SEED_PASSWORD;
+  if (PRODUCTION) {
+    password = required("ADMIN_PASSWORD");
+    const problems = validatePasswordPolicy(password);
+    if (problems.length) throw new Error(`ADMIN_PASSWORD: ${problems.join(" ")}`);
+    users = [{ email: required("ADMIN_EMAIL").toLowerCase(), name: required("ADMIN_NAME"), role: "ADMINISTRATOR" }];
+  }
+  const passwordHash = await bcrypt.hash(password, 12);
 
   const org =
-    (await prisma.organisation.findFirst({ where: { name: "Demo Verification Agency" } })) ??
-    (await prisma.organisation.create({ data: { name: "Demo Verification Agency" } }));
+    (await prisma.organisation.findFirst({ where: { name: orgName } })) ??
+    (await prisma.organisation.create({ data: { name: orgName } }));
 
   for (const [role, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
     for (const permission of perms) {
@@ -67,14 +88,14 @@ async function main() {
     }
   }
 
-  const users: Record<string, string> = {};
-  for (const u of USERS) {
+  const userIds: Record<string, string> = {};
+  for (const u of users) {
     const user = await prisma.user.upsert({
       where: { email: u.email },
       update: {},
       create: { ...u, organisationId: org.id, passwordHash },
     });
-    users[u.role] = user.id;
+    userIds[u.role] = user.id;
   }
 
   // ---- Regulatory library skeleton -----------------------------------------
@@ -182,13 +203,18 @@ async function main() {
     }
   }
 
+  if (PRODUCTION) {
+    console.log(`Production seed complete: organisation "${orgName}", administrator ${users[0]!.email}.`);
+    return;
+  }
+
   // ---- Demo client & engagement --------------------------------------------
   let client = await prisma.client.findFirst({ where: { organisationId: org.id, name: "Demo Client (Pty) Ltd" } });
   if (!client) {
     client = await prisma.client.create({
       data: { organisationId: org.id, name: "Demo Client (Pty) Ltd", contactName: "Client Contact", contactEmail: "client@client.test" },
     });
-    await prisma.clientUserAccess.create({ data: { userId: users.CLIENT_USER!, clientId: client.id } });
+    await prisma.clientUserAccess.create({ data: { userId: userIds.CLIENT_USER!, clientId: client.id } });
     const entity = await prisma.measuredEntity.create({
       data: { clientId: client.id, legalName: "Demo Client (Pty) Ltd", industryDescription: "Professional services" },
     });
@@ -198,9 +224,9 @@ async function main() {
         clientId: client.id,
         measuredEntityId: entity.id,
         status: "EVIDENCE_COLLECTION",
-        managerId: users.VERIFICATION_MANAGER,
-        analystId: users.VERIFICATION_ANALYST,
-        signatoryId: users.TECHNICAL_SIGNATORY,
+        managerId: userIds.VERIFICATION_MANAGER,
+        analystId: userIds.VERIFICATION_ANALYST,
+        signatoryId: userIds.TECHNICAL_SIGNATORY,
         measurementPeriods: {
           create: {
             label: "FY2026",

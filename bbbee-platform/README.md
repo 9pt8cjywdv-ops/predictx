@@ -56,6 +56,10 @@ Seeded users (password `Verify-Dev-2026!` unless `SEED_PASSWORD` is set):
 
 Full stack (Postgres + pgvector, MinIO, ClamAV, app): `docker compose up --build`.
 
+**Live deployment on a Mac mini:** see [`deploy/macmini/README.md`](deploy/macmini/README.md) — one
+installer sets up PostgreSQL, ClamAV, HTTPS, auto-start services and nightly backups, and creates your
+organisation and first administrator (`SEED_MODE=production`, no demo accounts).
+
 ## Commands
 
 | Command | Purpose |
