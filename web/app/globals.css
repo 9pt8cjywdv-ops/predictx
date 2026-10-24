@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+body { @apply bg-ink-950 text-slate-200 antialiased; }
+.card { @apply rounded-2xl border border-ink-700 bg-ink-900; }
+.chip { @apply rounded-full border px-3 py-1.5 text-sm transition-colors; }
+.chip-on { @apply border-win/60 bg-win/10 text-win; }
+.chip-off { @apply border-ink-700 text-slate-400 hover:border-ink-600 hover:text-slate-200; }
+.tnum { font-variant-numeric: tabular-nums; }

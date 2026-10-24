@@ -1,0 +1,40 @@
+# PredictX Sports: `cp engine/.env.example .env`, add keys, then `docker compose up --build`.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: predictx
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-predictx}
+      POSTGRES_DB: predictx
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U predictx"]
+      interval: 5s
+      retries: 10
+
+  engine-api:
+    build: ./engine
+    env_file: [{ path: .env, required: false }]
+    environment:
+      DATABASE_URL: postgresql+psycopg://predictx:${POSTGRES_PASSWORD:-predictx}@db:5432/predictx
+    depends_on: { db: { condition: service_healthy } }
+    ports: ["8000:8000"]
+
+  engine-worker:
+    build: ./engine
+    command: ["python", "-m", "predictx_engine.worker"]
+    env_file: [{ path: .env, required: false }]
+    environment:
+      DATABASE_URL: postgresql+psycopg://predictx:${POSTGRES_PASSWORD:-predictx}@db:5432/predictx
+    depends_on: { db: { condition: service_healthy } }
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    environment:
+      ENGINE_URL: http://engine-api:8000
+    depends_on: [engine-api]
+    ports: ["3000:3000"]
+
+volumes:
+  pgdata:
